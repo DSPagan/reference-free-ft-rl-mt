@@ -1,0 +1,19 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- Environments ---
+venv/
+env/
+.venv/
+
+# --- Secrets ---
+.env
+
+# --- Training outputs (LoRA adapters are published separately, see README) ---
+results/
+
+# --- Local dataset symlink (machine-specific path) ---
+/data
