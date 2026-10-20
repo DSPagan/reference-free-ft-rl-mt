@@ -36,7 +36,12 @@ one; `decoding_diagnostic.py` tests this (pending).
 
 ## Pending
 
-- [ ] GRPO eus_Latn 600m, 1 epoch, seed 42 (env B) + devtest evaluation vs baseline
+Scope: a single language, eus_Latn (600m, English source).
+
+- [ ] GRPO eus_Latn 600m, 1 epoch, seed 42, `--labse_weight 0.5` (paper's equal
+      weighting; the code's default from `reward_weights.csv` is 0.25 for eus_Latn) +
+      devtest evaluation vs baseline (env B)
 - [ ] `decoding_diagnostic.py` for eus_Latn 600m (env B)
-- [ ] Full 13-language baseline, 600m and 1.3b (env B)
+- [ ] Evaluate the published `exp_a_600m_en_eus_Latn` adapter from
+      `ergar/monolingual-reinforcement-learning-mt` (env B)
 - [ ] GRPO eus_Latn 600m, 3 epochs (paper recipe; Table 7 reports +2.44 chrF++)
