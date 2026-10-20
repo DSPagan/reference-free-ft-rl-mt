@@ -13,3 +13,4 @@ huggingface_hub
 numpy==1.26.4
 scipy==1.15.3
 tqdm
+setuptools<81  # torchmetrics 0.10 (pinned by unbabel-comet) imports pkg_resources

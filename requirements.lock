@@ -199,6 +199,8 @@ sentence-transformers==2.5.1
     # via -r requirements.txt
 sentencepiece==0.2.2
     # via unbabel-comet
+setuptools==80.10.2
+    # via -r requirements.txt
 six==1.17.0
     # via python-dateutil
 sympy==1.14.0
