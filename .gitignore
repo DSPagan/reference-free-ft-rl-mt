@@ -13,7 +13,9 @@ env/
 .env
 
 # --- Training outputs (LoRA adapters are published separately, see README) ---
-results/
+# Baseline evaluation outputs are small and versioned.
+results/*
+!results/baseline/
 
 # --- Local dataset symlink (machine-specific path) ---
 /data
