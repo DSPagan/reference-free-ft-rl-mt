@@ -7,10 +7,13 @@ Usage:
     python3 generate_translations.py --adapter_path results/arb_Arab_600m_en/adapters_best/arb_Arab \
         --lang arb_Arab --scale 600m
 
-Writes {output_dir}/{lang}_vanilla.csv, {output_dir}/{lang}_trained.csv (src,mt,ref) and
-prints the chrF++ gain.
+Omit --adapter_path to evaluate only the vanilla baseline.
+
+Writes {output_dir}/{lang}_vanilla.csv, {output_dir}/{lang}_trained.csv (src,mt,ref),
+{output_dir}/{lang}_summary.json (chosen settings + chrF++) and prints the chrF++ gain.
 """
 import argparse
+import json
 import os
 
 import pandas as pd
@@ -30,7 +33,8 @@ SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 
 def parse_args():
     p = argparse.ArgumentParser(description="Translate + evaluate a trained adapter against vanilla.")
-    p.add_argument("--adapter_path", required=True, help="Path to a trained LoRA adapter directory.")
+    p.add_argument("--adapter_path", default=None,
+                    help="Path to a trained LoRA adapter directory. Omit to evaluate only vanilla.")
     p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. arb_Arab")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
     p.add_argument("--source", choices=["en", "es"], default="en")
@@ -66,6 +70,16 @@ def main():
         os.path.join(args.output_dir, f"{args.lang}_vanilla.csv"), index=False)
     print(f"  Vanilla | setting={van_setting} | chrF++={van_chrf:.3f}")
 
+    summary = {"lang": args.lang, "scale": args.scale, "source": args.source,
+               "vanilla_setting": van_setting, "vanilla_chrf": van_chrf}
+    summary_path = os.path.join(args.output_dir, f"{args.lang}_summary.json")
+
+    if args.adapter_path is None:
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2)
+        torch.cuda.empty_cache()
+        return
+
     print(f"Loading adapter from {args.adapter_path}...")
     model = PeftModel.from_pretrained(base, args.adapter_path).eval()
     print("Fair-decoding trained adapter (dev-tuning 3-setting grid)...")
@@ -76,6 +90,10 @@ def main():
     print(f"  Trained | setting={trained_setting} | chrF++={trained_chrf:.3f}")
 
     print(f"\nchrF++ gain: {trained_chrf - van_chrf:+.3f}")
+    summary.update(adapter_path=args.adapter_path, trained_setting=trained_setting,
+                   trained_chrf=trained_chrf, chrf_gain=trained_chrf - van_chrf)
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
     torch.cuda.empty_cache()
 
 
