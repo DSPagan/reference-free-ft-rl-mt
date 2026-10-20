@@ -1,8 +1,7 @@
 """
-Builds the FLORES-200 parquet files main.py / generate_translations.py expect, from the
-raw FLORES-200 flat-text dump (data/flores200_dataset/{dev,devtest}/{lang}.{split},
-aligned by line number -- download from https://github.com/facebookresearch/flores and
-point --raw_dir at it).
+Builds the FLORES-200 parquet files main.py / generate_translations.py expect, downloading
+the per-language parquet files from the HuggingFace dataset facebook/flores
+(data/language/{lang}/{split}-00000-of-00001.parquet, aligned by row order).
 
 Writes to data/flores200_<src>/{target_lang}/{split}.parquet -- a separate tree per
 source language, so English- and Spanish-source runs never share a path.
@@ -15,8 +14,9 @@ import argparse
 import os
 
 import pandas as pd
+from huggingface_hub import hf_hub_download
 
-RAW_DIR = "data/flores200_dataset"
+HF_REPO = "facebook/flores"
 SPLITS = ["dev", "devtest"]
 
 LANGUAGES = [
@@ -27,11 +27,21 @@ LANGUAGES = [
 ]
 
 
+def load_sentences(lang, split):
+    """Returns the list of sentences for `lang`/`split`, or None if HF has no such file."""
+    try:
+        path = hf_hub_download(HF_REPO, f"data/language/{lang}/{split}-00000-of-00001.parquet",
+                               repo_type="dataset")
+    except Exception as e:
+        print(f"  [SKIP] {lang} {split}: could not download from {HF_REPO} ({type(e).__name__})")
+        return None
+    return pd.read_parquet(path)["sentence"].tolist()
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--source", required=True, help="e.g. eng_Latn or spa_Latn")
     p.add_argument("--languages", nargs="+", default=LANGUAGES)
-    p.add_argument("--raw_dir", default=RAW_DIR)
     p.add_argument("--out_dir", default=None,
                     help="Defaults to data/flores200_<src_3letter>, e.g. data/flores200_eng")
     args = p.parse_args()
@@ -39,20 +49,14 @@ def main():
     out_dir = args.out_dir or f"data/flores200_{args.source.split('_')[0]}"
 
     for split in SPLITS:
-        src_path = os.path.join(args.raw_dir, split, f"{args.source}.{split}")
-        if not os.path.exists(src_path):
-            print(f"[ERROR] source file missing: {src_path}")
+        src_sents = load_sentences(args.source, split)
+        if src_sents is None:
             continue
-        with open(src_path, encoding="utf-8") as f:
-            src_sents = f.read().splitlines()
 
         for lang in args.languages:
-            tgt_path = os.path.join(args.raw_dir, split, f"{lang}.{split}")
-            if not os.path.exists(tgt_path):
-                print(f"  [SKIP] {lang} {split}: no target file at {tgt_path}")
+            tgt_sents = load_sentences(lang, split)
+            if tgt_sents is None:
                 continue
-            with open(tgt_path, encoding="utf-8") as f:
-                tgt_sents = f.read().splitlines()
             if len(tgt_sents) != len(src_sents):
                 print(f"  [ERROR] {lang} {split}: length mismatch "
                       f"({len(src_sents)} src vs {len(tgt_sents)} tgt)")
