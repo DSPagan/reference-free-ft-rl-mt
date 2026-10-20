@@ -17,5 +17,3 @@ env/
 results/*
 !results/baseline/
 
-# --- Local dataset symlink (machine-specific path) ---
-/data
