@@ -12,8 +12,8 @@ env/
 # --- Secrets ---
 .env
 
-# --- Training outputs (LoRA adapters are published separately, see README) ---
-# Baseline evaluation outputs are small and versioned.
-results/*
-!results/baseline/
+# --- Training outputs: LoRA adapter weights are published separately (see README);
+# metrics, logs and evaluation outputs under results/ are versioned. ---
+results/**/adapters/
+results/**/adapters_best/
 
