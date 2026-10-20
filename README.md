@@ -36,22 +36,51 @@ docker run --gpus '"device=0"' -v $(pwd):/workspace \
     -v ~/.cache/huggingface:/workspace/.cache/huggingface -it monolingual-rl-mt bash
 ```
 
-Without Docker: `pip install -r requirements.txt` (CUDA 12.1 required for the pinned
-`torch` build). COMET-Kiwi (`Unbabel/wmt22-cometkiwi-da`) and LaBSE are pulled from the
-Hugging Face Hub on first run and cached.
+Without Docker, use Python 3.10 and install the fully pinned lock file (CUDA 12.1
+`torch` build):
+
+```bash
+uv venv -p 3.10 .venv
+uv pip install --python .venv --index-strategy unsafe-best-match -r requirements.lock
+```
+
+`requirements.txt` lists the direct dependencies; `requirements.lock` pins every
+transitive one and is what Docker and the commands above install. Regenerate it after
+editing `requirements.txt`:
+
+```bash
+uv pip compile requirements.txt --python-version 3.10 --python-platform x86_64-manylinux_2_28 \
+    --index-strategy unsafe-best-match --emit-index-url -o requirements.lock
+```
+
+On Google Colab, create the same Python 3.10 environment instead of installing into
+Colab's own Python (its preinstalled packages conflict with these pins), and run every
+script with that interpreter:
+
+```bash
+pip install -q uv
+uv venv -q -p 3.10 /content/venv
+uv pip install -q --python /content/venv --index-strategy unsafe-best-match -r requirements.lock
+/content/venv/bin/python main.py --lang eus_Latn --scale 600m --source en
+```
+
+COMET-Kiwi (`Unbabel/wmt22-cometkiwi-da`) and LaBSE are pulled from the Hugging Face Hub
+on first run and cached. COMET-Kiwi is gated: request access on its model page and
+export `HF_TOKEN` before training.
 
 ## Data
 
-Download the [FLORES-200 dataset](https://github.com/facebookresearch/flores) and point
-`prepare_data.py` at the raw dump:
+The prepared [FLORES-200](https://github.com/facebookresearch/flores) files (CC-BY-SA
+4.0) for the full 26-language set are committed under
+`data/flores200_eng/{lang}/{dev,devtest}.parquet` and `data/flores200_spa/` (Spanish
+source), so no download is needed. To rebuild them, `prepare_data.py` fetches the gated
+`facebook/flores` dataset from the Hugging Face Hub (request access and export
+`HF_TOKEN` first):
 
 ```bash
-python3 prepare_data.py --source eng_Latn --languages arb_Arab eus_Latn khm_Khmr pol_Latn swh_Latn zho_Hant
-python3 prepare_data.py --source spa_Latn --languages arb_Arab eus_Latn khm_Khmr pol_Latn swh_Latn zho_Hant
+python3 prepare_data.py --source eng_Latn
+python3 prepare_data.py --source spa_Latn
 ```
-
-This writes `data/flores200_eng/{lang}/{dev,devtest}.parquet` (and `flores200_spa/` for
-Spanish-source). Omit `--languages` to prepare the full 26-language set used in the paper.
 
 ## Training
 
