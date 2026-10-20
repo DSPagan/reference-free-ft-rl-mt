@@ -1,6 +1,7 @@
 """
 Decoding/precision diagnostic for the vanilla baseline: scores the un-adapted model on
-the full devtest split under every setting of the fair-decoding grid (no dev-tuning),
+the full devtest split under every setting of the fair-decoding grid (no dev-tuning)
+plus the trainer's intermediate-eval setting,
 once per weight precision -- 4-bit NF4 (as loaded everywhere else in this repo) and
 unquantized fp32. Used to see which configuration reproduces the paper's reported
 baseline numbers.
@@ -31,6 +32,9 @@ SCALE_TO_MODEL = {
 SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
 SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 PRECISIONS = ("4bit", "fp32")
+# The fair-decoding grid plus the setting src/trainer.py's intermediate eval uses, which
+# matches the paper's Table 6 "Max tokens (eval) 128".
+SETTINGS = {**GRID, "trainer_eval(beam4,lp1.0,cap128)": dict(num_beams=4, max_new_tokens=128)}
 
 
 def parse_args():
@@ -70,7 +74,7 @@ def main():
     for precision in args.precisions:
         print(f"Loading vanilla {model_name} ({precision})...")
         model = load_model(model_name, precision)
-        for name, kwargs in GRID.items():
+        for name, kwargs in SETTINGS.items():
             hyps = translate(model, tokenizer, tgt_token_id, srcs, kwargs,
                              batch_size=args.batch_size, device=DEVICE)
             score = chrf_corpus(hyps, refs)
