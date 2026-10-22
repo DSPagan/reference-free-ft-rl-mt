@@ -1,0 +1,40 @@
+[project]
+name = "reference-free-ft-rl-mt"
+version = "0.1.0"
+description = "GRPO fine-tuning of NLLB-200 with a reference-free LaBSE + COMET-Kiwi reward"
+readme = "README.md"
+authors = [
+    { name = "Daniel Sánchez Pagán", email = "dansanzpag@gmail.com" }
+]
+requires-python = "==3.10.*"
+dependencies = [
+    "torch==2.3.0+cu121",
+    "transformers==4.38.2",
+    "peft==0.7.1",
+    # Newer accelerate calls .to() on 4-bit models, which transformers 4.38 rejects.
+    "accelerate==0.27.2",
+    "bitsandbytes==0.49.2",
+    "sentence-transformers==2.5.1",
+    "unbabel-comet==2.2.7",
+    "sacrebleu==2.6.0",
+    "pandas==2.3.3",
+    "pyarrow",
+    "huggingface-hub",
+    "numpy==1.26.4",
+    "scipy==1.15.3",
+    "tqdm",
+    # torchmetrics 0.10 (pinned by unbabel-comet) imports pkg_resources, dropped in setuptools 81.
+    "setuptools<81",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }

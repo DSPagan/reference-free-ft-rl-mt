@@ -4,8 +4,8 @@ a test set under the paper's fair-decoding protocol (each system independently d
 over a 3-setting beam-search grid, see metrics/decoding.py), and scores chrF++.
 
 Usage:
-    python3 generate_translations.py --adapter_path results/arb_Arab_600m_en/adapters_best/arb_Arab \
-        --lang arb_Arab --scale 600m
+    uv run python generate_translations.py --adapter_path results/eus_Latn_600m/adapters_best/eus_Latn \
+        --lang eus_Latn --scale 600m
 
 Omit --adapter_path to evaluate only the vanilla baseline. Pass --setting to decode both
 systems with one fixed grid setting instead of dev-tuning it.
@@ -29,20 +29,18 @@ SCALE_TO_MODEL = {
     "600m": "facebook/nllb-200-distilled-600M",
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
-SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
+DATA_DIR = "data/flores200_eng"
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Translate + evaluate a trained adapter against vanilla.")
     p.add_argument("--adapter_path", default=None,
                     help="Path to a trained LoRA adapter directory. Omit to evaluate only vanilla.")
-    p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. arb_Arab")
+    p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. eus_Latn")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
-    p.add_argument("--source", choices=["en", "es"], default="en")
-    p.add_argument("--data_dir", default=None,
-                    help="Defaults to data/flores200_eng/ or data/flores200_spa/ (see "
-                         "--source) -- expects {lang}/dev.parquet (for decoding-setting "
-                         "dev-tuning) and {lang}/devtest.parquet (held-out test).")
+    p.add_argument("--data_dir", default=DATA_DIR,
+                    help="Expects {lang}/dev.parquet (for decoding-setting dev-tuning) and "
+                         "{lang}/devtest.parquet (held-out test).")
     p.add_argument("--output_dir", default="results/translations")
     p.add_argument("--setting", choices=GRID, default=None,
                     help="Decode both systems with this fixed setting instead of dev-tuning the "
@@ -53,7 +51,7 @@ def parse_args():
 def main():
     args = parse_args()
     model_name = SCALE_TO_MODEL[args.scale]
-    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
+    data_dir = args.data_dir
     os.makedirs(args.output_dir, exist_ok=True)
 
     dev = pd.read_parquet(os.path.join(data_dir, args.lang, "dev.parquet")).iloc[:100]
@@ -80,7 +78,7 @@ def main():
         os.path.join(args.output_dir, f"{args.lang}_vanilla.csv"), index=False)
     print(f"  Vanilla | setting={van_setting} | chrF++={van_chrf:.3f}")
 
-    summary = {"lang": args.lang, "scale": args.scale, "source": args.source,
+    summary = {"lang": args.lang, "scale": args.scale,
                "vanilla_setting": van_setting, "vanilla_chrf": van_chrf}
     summary_path = os.path.join(args.output_dir, f"{args.lang}_summary.json")
 

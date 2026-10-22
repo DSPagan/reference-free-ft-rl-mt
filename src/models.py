@@ -2,7 +2,7 @@
 Model loading: 4-bit NF4 quantized NLLB-200 base + rank-16 LoRA adapter on q_proj/v_proj.
 """
 import torch
-from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForSeq2SeqLM, BitsAndBytesConfig
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -31,17 +31,10 @@ def load_base_model(model_name):
     )
 
 
-def load_actor(model_name, lora_r=16, lora_alpha=32, lora_dropout=0.05, init_adapter_path=None):
-    """
-    Loads the trainable policy: 4-bit base + LoRA adapter. If init_adapter_path is given
-    (SFT->GRPO cascade), continues GRPO from that existing adapter instead of a fresh one.
-    """
+def load_actor(model_name, lora_r=16, lora_alpha=32, lora_dropout=0.05):
+    """Loads the trainable policy: 4-bit base + a fresh LoRA adapter."""
     base = prepare_model_for_kbit_training(load_base_model(model_name), use_gradient_checkpointing=False)
-    if init_adapter_path:
-        print(f"  Initializing GRPO LoRA from existing adapter: {init_adapter_path}")
-        actor = PeftModel.from_pretrained(base, init_adapter_path, is_trainable=True)
-    else:
-        actor = get_peft_model(base, make_lora_config(lora_r, lora_alpha, lora_dropout))
+    actor = get_peft_model(base, make_lora_config(lora_r, lora_alpha, lora_dropout))
     actor.enable_input_require_grads()
     return actor
 

@@ -47,11 +47,10 @@ def get_log_probs(model, tokenizer, input_ids, attention_mask, gen_ids):
 
 
 def train_step(actor, tokenizer, rewarder, optimizer, src_text, lang, temp_controller,
-               k=12, max_new_tokens=64, kl_beta=0.001, advantage_type="grpo"):
+               k=12, max_new_tokens=64, kl_beta=0.001):
     """
     One GRPO update: sample K hypotheses, score them, take a single clipped-surrogate +
-    KL-penalized gradient step. advantage_type="rloo" uses the REINFORCE leave-one-out
-    baseline (no std normalization) instead of GRPO's group-relative advantage.
+    KL-penalized gradient step.
 
     Note on the ratio: ref_log_probs is computed with the LoRA adapter disabled (the
     frozen pretrained base); curr_log_probs with the adapter enabled, the same weights
@@ -83,12 +82,7 @@ def train_step(actor, tokenizer, rewarder, optimizer, src_text, lang, temp_contr
     rewards = rewarder.get_reward(src_text, hyps)
     avg_reward_raw = float(rewards.mean())
 
-    if advantage_type == "rloo":
-        total = rewards.sum()
-        loo_baseline = (total - rewards) / (k - 1)
-        advantages_arr = rewards - loo_baseline
-    else:
-        advantages_arr = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
+    advantages_arr = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
     advantages = torch.tensor(advantages_arr, dtype=torch.float32).to(DEVICE)
 
     exp_inputs = {name: v.expand(k, -1) for name, v in inputs.items()}
@@ -141,7 +135,7 @@ def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size
 
 def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, out_dir,
                   n_epochs=3, lr=5e-6, k=12, max_new_tokens_train=64, max_new_tokens_eval=128,
-                  kl_beta=0.001, advantage_type="grpo", eval_every=50, eval_n_samples=100,
+                  kl_beta=0.001, eval_every=50, eval_n_samples=100,
                   eval_batch_size=8, temp_kwargs=None):
     """
     Trains for n_epochs over df_train, intermediate-eval'ing every eval_every steps and
@@ -164,7 +158,7 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
         for row in pbar:
             loss_val, reward_raw, kl_val, temp = train_step(
                 actor, tokenizer, rewarder, optimizer, row.src, lang, temp_controller,
-                k=k, max_new_tokens=max_new_tokens_train, kl_beta=kl_beta, advantage_type=advantage_type,
+                k=k, max_new_tokens=max_new_tokens_train, kl_beta=kl_beta,
             )
 
             chrf_val = None
