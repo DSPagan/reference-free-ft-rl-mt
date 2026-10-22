@@ -65,8 +65,9 @@ with that fixed setting.
 
 Scope: a single language, eus_Latn (600m, English source).
 
-- [ ] GRPO eus_Latn 600m, 1 epoch, seed 42, `--labse_weight 0.5` (paper's equal
-      weighting; the code's default from `reward_weights.csv` is 0.25 for eus_Latn) +
+- [ ] GRPO eus_Latn 600m, 1 epoch, seed 42, LaBSE weight 0.5 (paper's equal
+      weighting, now the default; the original code looked up per-language weights from
+      a reward_weights.csv, 0.25 for eus_Latn, which the smoke tests above used) +
       devtest evaluation vs baseline (env B)
 - [x] `decoding_diagnostic.py` for eus_Latn 600m (env B): Table 7 baseline reproduced
 - [ ] Evaluate the published `exp_a_600m_en_eus_Latn` adapter from

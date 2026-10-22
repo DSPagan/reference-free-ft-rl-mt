@@ -27,7 +27,6 @@ generate_translations.py   Inference entry point -- loads an adapter, decodes, s
                         chrF++ against vanilla
 decoding_diagnostic.py Scores vanilla under every decoding setting, 4-bit and fp32
 prepare_data.py        Builds the FLORES-200 parquet files the above expect
-reward_weights.csv     Per-language LaBSE/COMET-Kiwi blend from the original repo
 pyproject.toml, uv.lock   Python 3.10 environment, every dependency pinned
 ```
 
@@ -72,13 +71,12 @@ uv run python prepare_data.py
 One language per invocation:
 
 ```bash
-uv run python main.py --lang eus_Latn --scale 600m --labse_weight 0.5
+uv run python main.py --lang eus_Latn --scale 600m
 ```
 
 Defaults match the paper's recipe (LoRA r=16/α=32/dropout=0.05 on `q_proj`/`v_proj`,
 4-bit NF4 double-quant, AdamW lr=5e-6, K=12, β=0.001, 3 epochs, sampling temperature
-1.2). The paper uses an equal 0.5 LaBSE/COMET-Kiwi blend; without `--labse_weight` the
-weight is looked up from `reward_weights.csv` instead (0.25 for eus_Latn). Other options:
+1.2, equal 0.5 LaBSE/COMET-Kiwi reward blend). Other options: `--labse_weight`,
 `--kl_beta`, `--n_epochs`, `--k`, `--seed`, ... (see `uv run python main.py --help`).
 
 Outputs land in `results/{lang}_{scale}/`: `adapters_best/{lang}/` (the checkpoint with

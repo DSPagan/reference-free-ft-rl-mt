@@ -29,7 +29,7 @@ class GRPORewarder:
     """
     Computes the per-sample reward for a group of K sampled hypotheses. `labse_weight`
     (w) sets the hybrid blend: reward = w*LaBSE + (1-w)*COMET-Kiwi. The paper uses an
-    equal 0.5 blend; reward_weights.csv holds per-language weights from the original repo.
+    equal 0.5 blend.
     """
 
     def __init__(self, resources, labse_weight=0.5):

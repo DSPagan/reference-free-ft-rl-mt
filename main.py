@@ -39,10 +39,8 @@ def parse_args():
                          "intermediate chrF++ eval.")
     p.add_argument("--output_dir", default=None, help="Defaults to results/{lang}_{scale}")
 
-    p.add_argument("--labse_weight", type=float, default=None,
-                    help="Hybrid-reward blend (reward = w*LaBSE + (1-w)*COMET-Kiwi). If not "
-                         "given, looked up from reward_weights.csv for --lang (falls back to "
-                         "0.5 if the language isn't in that file). The paper uses 0.5.")
+    p.add_argument("--labse_weight", type=float, default=0.5,
+                    help="Hybrid-reward blend: reward = w*LaBSE + (1-w)*COMET-Kiwi. The paper uses 0.5.")
 
     p.add_argument("--n_epochs", type=int, default=3)
     p.add_argument("--lr", type=float, default=5e-6)
@@ -69,19 +67,6 @@ def parse_args():
     return p.parse_args()
 
 
-def resolve_labse_weight(args):
-    if args.labse_weight is not None:
-        return args.labse_weight
-    if os.path.exists("reward_weights.csv"):
-        weights = pd.read_csv("reward_weights.csv").set_index("lang")["labse_weight"]
-        if args.lang in weights.index:
-            w = float(weights[args.lang])
-            print(f"  LaBSE weight for {args.lang}: {w} (from reward_weights.csv)")
-            return w
-    print(f"  [WARN] No calibrated weight for {args.lang} in reward_weights.csv -- using 0.5")
-    return 0.5
-
-
 def main():
     args = parse_args()
     if args.seed is not None:
@@ -97,11 +82,10 @@ def main():
     out_dir = args.output_dir or f"results/{args.lang}_{args.scale}"
     os.makedirs(out_dir, exist_ok=True)
 
-    labse_weight = resolve_labse_weight(args)
     with open(os.path.join(out_dir, "config.txt"), "w") as f:
         for k, v in sorted(vars(args).items()):
             f.write(f"{k}: {v}\n")
-        f.write(f"model_name: {model_name}\nlabse_weight: {labse_weight}\n")
+        f.write(f"model_name: {model_name}\n")
 
     dev_path = os.path.join(args.data_dir, args.lang, "dev.parquet")
     if not os.path.exists(dev_path):
@@ -112,11 +96,11 @@ def main():
     df_eval = df_train  # same FLORES-200 dev split; intermediate eval is sparse and sampled
 
     print(f"\n{'=' * 60}\n  Language:    {args.lang}\n  Model:       {model_name}\n"
-          f"  Reward:      hybrid (w={labse_weight})\n  Epochs:      {args.n_epochs} "
+          f"  Reward:      hybrid (w={args.labse_weight})\n  Epochs:      {args.n_epochs} "
           f"({len(df_train)} sentences/epoch)\n  Output:      {out_dir}\n{'=' * 60}\n")
 
     resources = RewardResources(model_name)
-    rewarder = GRPORewarder(resources, labse_weight)
+    rewarder = GRPORewarder(resources, args.labse_weight)
     logger = TrainingLogger(os.path.join(out_dir, "training_metrics.csv"))
     actor = load_actor(model_name, args.lora_r, args.lora_alpha, args.lora_dropout)
 
