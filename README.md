@@ -33,21 +33,19 @@ pyproject.toml, uv.lock   Python 3.10 environment, every dependency pinned
 ## Setup
 
 The environment is a [uv](https://docs.astral.sh/uv/) project pinned to Python 3.10 and
-the CUDA 12.1 `torch` build (Linux x86_64 only). `uv.lock` pins every transitive
-dependency:
+the CUDA 12.1 `torch` build. It needs Linux x86_64 and an NVIDIA GPU whose driver
+supports CUDA 12.1. `uv.lock` pins every transitive dependency; `uv sync` builds an
+isolated `.venv` with its own Python 3.10, independent of the system Python:
 
 ```bash
 uv sync
-uv run python main.py --help
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-On Google Colab, do the same inside the cloned repo. `uv sync` builds an isolated
-`.venv` with its own Python 3.10, so Colab's preinstalled packages don't interfere:
+Long runs can be detached from the terminal, e.g.:
 
 ```bash
-pip install -q uv
-uv sync
-uv run python main.py --lang eus_Latn --scale 600m
+nohup uv run python main.py --lang eus_Latn --scale 600m > results/train_eus_600m.log 2>&1 &
 ```
 
 COMET-Kiwi (`Unbabel/wmt22-cometkiwi-da`) and LaBSE are pulled from the Hugging Face Hub

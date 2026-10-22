@@ -10,7 +10,11 @@ where, and how it compares to the paper.
 | Id | Where | Python | torch | Notes |
 |---|---|---|---|---|
 | A | Colab, Tesla T4 | 3.13 | Colab preinstalled | Ad hoc install into Colab's own Python (`numpy` 1.26.4 built from source, `accelerate==0.27.2`, `USE_FLAX=0`). Superseded by B. |
-| B | Colab, Tesla T4 | 3.10.22 | 2.3.0+cu121 | Isolated venv installed from `requirements.lock`, since replaced by `uv.lock`, which pins the same 77 package versions (`uv sync`, see README). Reference environment from here on. |
+| B | Colab, Tesla T4 | 3.10.22 | 2.3.0+cu121 | Isolated venv installed from `requirements.lock`, since replaced by `uv.lock`, which pins the same 77 package versions (`uv sync`, see README). |
+
+From 2026-10-22 runs move from Colab to a compute server, running the scripts directly
+with `uv run`. Add the server's environment here (GPU, driver) once known; results from
+env B are kept for comparison.
 
 ## Baseline (vanilla NLLB-200, 4-bit NF4, fair decoding)
 
