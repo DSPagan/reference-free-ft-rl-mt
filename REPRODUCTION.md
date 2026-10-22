@@ -11,7 +11,6 @@ where, and how it compares to the paper.
 |---|---|---|---|---|
 | A | Colab, Tesla T4 | 3.13 | Colab preinstalled | Ad hoc install into Colab's own Python (`numpy` 1.26.4 built from source, `accelerate==0.27.2`, `USE_FLAX=0`). Superseded by B. |
 | B | Colab, Tesla T4 | 3.10.22 | 2.3.0+cu121 | Isolated venv installed from `requirements.lock`, since replaced by `uv.lock`, which pins the same 77 package versions (`uv sync`, see README). |
-
 | C | Server `abaco` (SLURM), NVIDIA GeForce RTX 2080 Ti 11 GB (8 cards, 1 per job), driver 575.57.08 | 3.10 (uv) | 2.3.0+cu121 | `uv sync` from `uv.lock`; jobs via `slurm/run.sbatch`. Same GPU architecture as the T4 (Turing, bf16 emulated), so results should be comparable with B. Reference environment from 2026-10-23 on. |
 
 ## Baseline (vanilla NLLB-200, 4-bit NF4, fair decoding)
