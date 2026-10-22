@@ -7,7 +7,8 @@ Usage:
     python3 generate_translations.py --adapter_path results/arb_Arab_600m_en/adapters_best/arb_Arab \
         --lang arb_Arab --scale 600m
 
-Omit --adapter_path to evaluate only the vanilla baseline.
+Omit --adapter_path to evaluate only the vanilla baseline. Pass --setting to decode both
+systems with one fixed grid setting instead of dev-tuning it.
 
 Writes {output_dir}/{lang}_vanilla.csv, {output_dir}/{lang}_trained.csv (src,mt,ref),
 {output_dir}/{lang}_summary.json (chosen settings + chrF++) and prints the chrF++ gain.
@@ -21,7 +22,7 @@ import torch
 from peft import PeftModel
 
 from metrics.chrf import chrf_corpus
-from metrics.decoding import fair_decode
+from metrics.decoding import GRID, fair_decode, translate
 from src.models import load_vanilla_model
 
 SCALE_TO_MODEL = {
@@ -43,6 +44,9 @@ def parse_args():
                          "--source) -- expects {lang}/dev.parquet (for decoding-setting "
                          "dev-tuning) and {lang}/devtest.parquet (held-out test).")
     p.add_argument("--output_dir", default="results/translations")
+    p.add_argument("--setting", choices=GRID, default=None,
+                    help="Decode both systems with this fixed setting instead of dev-tuning the "
+                         "grid. 'default(beam5,lp1.0)' reproduces the paper's Table 7 baseline.")
     return p.parse_args()
 
 
@@ -61,10 +65,16 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang="eng_Latn")
     tgt_token_id = tokenizer.convert_tokens_to_ids(args.lang)
 
+    def decode(model):
+        if args.setting:
+            return translate(model, tokenizer, tgt_token_id, test_srcs, GRID[args.setting]), args.setting
+        return fair_decode(model, tokenizer, tgt_token_id, dev_srcs, dev_refs, test_srcs)
+
+    mode = f"fixed setting {args.setting}" if args.setting else "dev-tuning 3-setting grid"
     print(f"Loading vanilla {model_name}...")
     base = load_vanilla_model(model_name)
-    print("Fair-decoding vanilla (dev-tuning 3-setting grid)...")
-    van_hyps, van_setting = fair_decode(base, tokenizer, tgt_token_id, dev_srcs, dev_refs, test_srcs)
+    print(f"Decoding vanilla ({mode})...")
+    van_hyps, van_setting = decode(base)
     van_chrf = chrf_corpus(van_hyps, test_refs)
     pd.DataFrame({"src": test_srcs, "mt": van_hyps, "ref": test_refs}).to_csv(
         os.path.join(args.output_dir, f"{args.lang}_vanilla.csv"), index=False)
@@ -82,8 +92,8 @@ def main():
 
     print(f"Loading adapter from {args.adapter_path}...")
     model = PeftModel.from_pretrained(base, args.adapter_path).eval()
-    print("Fair-decoding trained adapter (dev-tuning 3-setting grid)...")
-    trained_hyps, trained_setting = fair_decode(model, tokenizer, tgt_token_id, dev_srcs, dev_refs, test_srcs)
+    print(f"Decoding trained adapter ({mode})...")
+    trained_hyps, trained_setting = decode(model)
     trained_chrf = chrf_corpus(trained_hyps, test_refs)
     pd.DataFrame({"src": test_srcs, "mt": trained_hyps, "ref": test_refs}).to_csv(
         os.path.join(args.output_dir, f"{args.lang}_trained.csv"), index=False)

@@ -70,6 +70,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang=SOURCE_TO_CODE[args.source])
     tgt_token_id = tokenizer.convert_tokens_to_ids(args.lang)
 
+    summary_path = os.path.join(out_dir, f"{args.lang}_decoding_grid.csv")
     rows = []
     for precision in args.precisions:
         print(f"Loading vanilla {model_name} ({precision})...")
@@ -81,6 +82,7 @@ def main():
             print(f"  {precision} | {name} | chrF++={score:.3f}")
             rows.append({"lang": args.lang, "scale": args.scale, "source": args.source,
                          "precision": precision, "setting": name, "chrf": score})
+            pd.DataFrame(rows).to_csv(summary_path, index=False)  # incremental: survives an OOM
             slug = re.sub(r"[^A-Za-z0-9.]+", "_", name).strip("_")
             pd.DataFrame({"src": srcs, "mt": hyps, "ref": refs}).to_csv(
                 os.path.join(out_dir, f"{args.lang}_{precision}_{slug}.csv"), index=False)
@@ -89,7 +91,6 @@ def main():
         torch.cuda.empty_cache()
 
     summary = pd.DataFrame(rows)
-    summary.to_csv(os.path.join(out_dir, f"{args.lang}_decoding_grid.csv"), index=False)
     print("\n" + summary.pivot(index="setting", columns="precision", values="chrf").round(2).to_string())
 
 

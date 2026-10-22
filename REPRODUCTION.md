@@ -23,9 +23,36 @@ Decoding setting is the winner of the 3-setting dev-tuning grid (`metrics/decodi
 
 A vs B differ by only 0.14 chrF++, so library versions do not explain the gap to the
 paper. The paper itself reports three different eus_Latn 600M baselines (Table 1: 52.69,
-Table 7: 47.75, Table 3 / Appendix J: 47.64). Leading hypothesis: the paper's baseline
-uses the default decoding setting (beam 5, length penalty 1.0) rather than the dev-tuned
-one; `decoding_diagnostic.py` tests this (pending).
+Table 7: 47.75, Table 3 / Appendix J: 47.64).
+
+### Decoding / precision diagnostic
+
+`decoding_diagnostic.py`, env B, 2026-10-22: vanilla eus_Latn 600m on the full devtest
+under each setting, no dev-tuning.
+
+| Setting | Beam | Length penalty | Max new tokens | 4-bit | fp32 | Paper |
+|---|---|---|---|---|---|---|
+| `default(beam5,lp1.0)` | 5 | 1.0 | 128 | **47.740** | 47.886 | **Table 7: 47.75** |
+| `trainer_eval(beam4,lp1.0,cap128)` | 4 | 1.0 | 128 | 47.584 | OOM | Table 3 / App. J: 47.64 |
+| `lp3.0,cap256,beam8` | 8 | 3.0 | 256 | 48.607 | OOM | |
+| `lp2.0,cap256` (dev-tuned winner) | 5 | 2.0 | 256 | 49.307 | 49.964 | |
+
+The two missing fp32 rows ran out of memory on the T4 (beam 8 / batch 16) and were not
+rerun: they do not change the conclusions.
+
+**Conclusions**
+
+- The paper's Table 7 baseline is reproduced (47.740 vs 47.75) with the default beam
+  search (beam 5, length penalty 1.0, 128 new tokens) on the 4-bit model.
+- Table 3 / Appendix J (47.64) match the trainer's intermediate-eval setting (beam 4).
+- Our earlier +1.56 gap was entirely the repo's dev-tuned decoding, which picks
+  `lp2.0,cap256` for eus_Latn.
+- 4-bit quantization costs only 0.15 chrF++ at the default setting.
+- No setting reproduces Table 1 (52.69).
+
+To compare GRPO against the paper's Table 7 (+2.44 for eus_Latn 600M), evaluate with
+`generate_translations.py --setting "default(beam5,lp1.0)"`, which decodes both systems
+with that fixed setting.
 
 ## GRPO training
 
@@ -41,7 +68,7 @@ Scope: a single language, eus_Latn (600m, English source).
 - [ ] GRPO eus_Latn 600m, 1 epoch, seed 42, `--labse_weight 0.5` (paper's equal
       weighting; the code's default from `reward_weights.csv` is 0.25 for eus_Latn) +
       devtest evaluation vs baseline (env B)
-- [ ] `decoding_diagnostic.py` for eus_Latn 600m (env B)
+- [x] `decoding_diagnostic.py` for eus_Latn 600m (env B): Table 7 baseline reproduced
 - [ ] Evaluate the published `exp_a_600m_en_eus_Latn` adapter from
       `ergar/monolingual-reinforcement-learning-mt` (env B)
 - [ ] GRPO eus_Latn 600m, 3 epochs (paper recipe; Table 7 reports +2.44 chrF++)
