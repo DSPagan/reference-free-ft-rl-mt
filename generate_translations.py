@@ -45,6 +45,8 @@ def parse_args():
     p.add_argument("--setting", choices=GRID, default=None,
                     help="Decode both systems with this fixed setting instead of dev-tuning the "
                          "grid. 'default(beam5,lp1.0)' reproduces the paper's Table 7 baseline.")
+    p.add_argument("--batch_size", type=int, default=16,
+                    help="Sentences per generate() call. Lower it (e.g. 8) if the GPU runs out of memory.")
     return p.parse_args()
 
 
@@ -65,8 +67,9 @@ def main():
 
     def decode(model):
         if args.setting:
-            return translate(model, tokenizer, tgt_token_id, test_srcs, GRID[args.setting]), args.setting
-        return fair_decode(model, tokenizer, tgt_token_id, dev_srcs, dev_refs, test_srcs)
+            hyps = translate(model, tokenizer, tgt_token_id, test_srcs, GRID[args.setting], args.batch_size)
+            return hyps, args.setting
+        return fair_decode(model, tokenizer, tgt_token_id, dev_srcs, dev_refs, test_srcs, args.batch_size)
 
     mode = f"fixed setting {args.setting}" if args.setting else "dev-tuning 3-setting grid"
     print(f"Loading vanilla {model_name}...")

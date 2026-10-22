@@ -17,3 +17,7 @@ env/
 results/**/adapters/
 results/**/adapters_best/
 
+# --- SLURM job logs (stdout/stderr of slurm/run.sbatch) ---
+logs/*
+!logs/.gitkeep
+

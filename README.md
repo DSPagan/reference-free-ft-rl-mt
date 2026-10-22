@@ -42,11 +42,23 @@ uv sync
 uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-Long runs can be detached from the terminal, e.g.:
+### Running on the SLURM cluster
+
+Run `uv sync` once on the login node, then submit any script with
+[slurm/run.sbatch](slurm/run.sbatch) (one GPU per job; stdout/stderr go to
+`logs/<job-name>-<job-id>.out`):
 
 ```bash
-nohup uv run python main.py --lang eus_Latn --scale 600m > results/train_eus_600m.log 2>&1 &
+export HF_TOKEN=...   # COMET-Kiwi is gated
+jid=$(sbatch --parsable --job-name=train-eus slurm/run.sbatch \
+    main.py --lang eus_Latn --scale 600m --n_epochs 1 --seed 42 --output_dir results/eus_Latn_600m)
+sbatch --dependency=afterok:$jid --job-name=eval-eus slurm/run.sbatch \
+    generate_translations.py --adapter_path results/eus_Latn_600m/adapters_best/eus_Latn \
+    --lang eus_Latn --scale 600m --setting "default(beam5,lp1.0)" --output_dir results/grpo/600m
 ```
+
+The second job starts only if training succeeds. Check jobs with `squeue -u $USER` and
+follow one with `tail -f logs/train-eus-<jobid>.out`.
 
 COMET-Kiwi (`Unbabel/wmt22-cometkiwi-da`) and LaBSE are pulled from the Hugging Face Hub
 on first run and cached. COMET-Kiwi is gated: request access on its model page and
