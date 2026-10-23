@@ -11,12 +11,9 @@ from src.models import DEVICE
 
 
 class RewardResources:
-    """Loads the NLLB tokenizer and both reward models."""
+    """Loads both reward models."""
 
-    def __init__(self, model_name):
-        from transformers import AutoTokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-
+    def __init__(self):
         print("Loading COMET-Kiwi (reward model, reference-free)...")
         self.comet_kiwi = load_from_checkpoint(download_model("Unbabel/wmt22-cometkiwi-da"))
         self.comet_kiwi.eval()

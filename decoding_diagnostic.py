@@ -7,7 +7,7 @@ unquantized fp32. Used to see which configuration reproduces the paper's reporte
 baseline numbers.
 
 Usage:
-    uv run python decoding_diagnostic.py --lang eus_Latn --scale 600m
+    uv run python decoding_diagnostic.py --lang eus_Latn --scale 600m --source en
 
 Writes {output_dir}/{lang}_decoding_grid.csv (precision, setting, chrF++) and one
 {output_dir}/{lang}_{precision}_{setting}.csv (src,mt,ref) per run.
@@ -29,7 +29,8 @@ SCALE_TO_MODEL = {
     "600m": "facebook/nllb-200-distilled-600M",
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
-DATA_DIR = "data/flores200_eng"
+SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
+SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 PRECISIONS = ("4bit", "fp32")
 # The fair-decoding grid plus the setting src/trainer.py's intermediate eval uses, which
 # matches the paper's Table 6 "Max tokens (eval) 128".
@@ -40,12 +41,13 @@ def parse_args():
     p = argparse.ArgumentParser(description="Score vanilla NLLB under every decoding setting and precision.")
     p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. eus_Latn")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
+    p.add_argument("--source", choices=SOURCE_TO_CODE, default="en")
     p.add_argument("--precisions", nargs="+", choices=PRECISIONS, default=list(PRECISIONS))
     p.add_argument("--batch_size", type=int, default=16,
                     help="Lower it (e.g. 8) if fp32 runs out of GPU memory.")
-    p.add_argument("--data_dir", default=DATA_DIR)
+    p.add_argument("--data_dir", default=None)
     p.add_argument("--output_dir", default=None,
-                    help="Defaults to results/baseline/diagnostic/{scale}")
+                    help="Defaults to results/baseline/diagnostic/{scale}_{source}")
     return p.parse_args()
 
 
@@ -58,14 +60,14 @@ def load_model(model_name, precision):
 def main():
     args = parse_args()
     model_name = SCALE_TO_MODEL[args.scale]
-    data_dir = args.data_dir
-    out_dir = args.output_dir or f"results/baseline/diagnostic/{args.scale}"
+    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
+    out_dir = args.output_dir or f"results/baseline/diagnostic/{args.scale}_{args.source}"
     os.makedirs(out_dir, exist_ok=True)
 
     devtest = pd.read_parquet(os.path.join(data_dir, args.lang, "devtest.parquet"))
     srcs, refs = devtest.src.astype(str).tolist(), devtest.ref.astype(str).tolist()
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang="eng_Latn")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang=SOURCE_TO_CODE[args.source])
     tgt_token_id = tokenizer.convert_tokens_to_ids(args.lang)
 
     summary_path = os.path.join(out_dir, f"{args.lang}_decoding_grid.csv")
@@ -78,7 +80,7 @@ def main():
                              batch_size=args.batch_size, device=DEVICE)
             score = chrf_corpus(hyps, refs)
             print(f"  {precision} | {name} | chrF++={score:.3f}")
-            rows.append({"lang": args.lang, "scale": args.scale,
+            rows.append({"lang": args.lang, "scale": args.scale, "source": args.source,
                          "precision": precision, "setting": name, "chrf": score})
             pd.DataFrame(rows).to_csv(summary_path, index=False)  # incremental: survives an OOM
             slug = re.sub(r"[^A-Za-z0-9.]+", "_", name).strip("_")

@@ -64,13 +64,41 @@ with that fixed setting.
 
 ## Pending
 
-Scope: a single language, eus_Latn (600m, English source).
+Paper reproduction scope: a single language, eus_Latn (600m, English source).
 
-- [ ] GRPO eus_Latn 600m, 1 epoch, seed 42, LaBSE weight 0.5 (paper's equal
-      weighting, now the default; the original code looked up per-language weights from
-      a reward_weights.csv, 0.25 for eus_Latn, which the smoke tests above used) +
-      devtest evaluation vs baseline (env B)
 - [x] `decoding_diagnostic.py` for eus_Latn 600m (env B): Table 7 baseline reproduced
 - [ ] Evaluate the published `exp_a_600m_en_eus_Latn` adapter from
-      `ergar/monolingual-reinforcement-learning-mt` (env B)
-- [ ] GRPO eus_Latn 600m, 3 epochs (paper recipe; Table 7 reports +2.44 chrF++)
+      `ergar/monolingual-reinforcement-learning-mt` (env C)
+- [ ] GRPO eus_Latn 600m, 3 epochs, seed 42, LaBSE weight 0.5 (paper recipe; Table 7
+      reports +2.44 chrF++) + devtest evaluation with `default(beam5,lp1.0)` (env C).
+      The original code looked up per-language weights from a reward_weights.csv
+      (0.25 for eus_Latn), which the smoke tests above used.
+
+# Valencian (IPD) reward
+
+Our extension: GRPO with AVLizador's Índex de Puresa Dialectal as the reward
+(`--reward ipd`, `src/ipd_reward.py`), eng_Latn/spa_Latn → cat_Latn. AVLizador is the
+`third_party/AVLizador` submodule pinned at `b975be2` (2026-10-22); the IPD needs spaCy's
+`ca_core_news_md` (3.8.0, spaCy 3.8.7) for its POS filter, which AVLizador silently skips
+when the model is missing, so `src/ipd_reward.py` fails loudly instead.
+
+## FLORES-200 cat_Latn references
+
+Corpus-level IPD of the human references (identical for both sources: same Catalan
+side), 2026-10-23:
+
+| Split | IPD | Western | Eastern | Sentences with no marked word |
+|---|---|---|---|---|
+| dev | 0.205 | 148 | 574 | 492 / 997 |
+| devtest | 0.188 | 130 | 561 | 532 / 1012 |
+
+The references are Eastern Catalan, so chrF++ against them (the paper's metric and the
+intermediate eval that picks `adapters_best`) will penalize successful Valencianization.
+About half the sentences have no dialectally marked word in the reference.
+
+## Pending
+
+- [ ] Smoke test of `--reward ipd` on the server (env C)
+- [ ] Baselines eng→cat and spa→cat with `--ipd`
+- [ ] Decide checkpoint selection and evaluation metrics for IPD runs (chrF++ against
+      an Eastern Catalan reference rewards the opposite of what IPD trains for)

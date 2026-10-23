@@ -8,7 +8,8 @@ Usage:
         --lang eus_Latn --scale 600m
 
 Omit --adapter_path to evaluate only the vanilla baseline. Pass --setting to decode both
-systems with one fixed grid setting instead of dev-tuning it.
+systems with one fixed grid setting instead of dev-tuning it, and --ipd to also report the
+corpus-level dialectal purity index (Catalan targets).
 
 Writes {output_dir}/{lang}_vanilla.csv, {output_dir}/{lang}_trained.csv (src,mt,ref),
 {output_dir}/{lang}_summary.json (chosen settings + chrF++) and prints the chrF++ gain.
@@ -29,7 +30,8 @@ SCALE_TO_MODEL = {
     "600m": "facebook/nllb-200-distilled-600M",
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
-DATA_DIR = "data/flores200_eng"
+SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
+SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 
 
 def parse_args():
@@ -38,8 +40,10 @@ def parse_args():
                     help="Path to a trained LoRA adapter directory. Omit to evaluate only vanilla.")
     p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. eus_Latn")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
-    p.add_argument("--data_dir", default=DATA_DIR,
-                    help="Expects {lang}/dev.parquet (for decoding-setting dev-tuning) and "
+    p.add_argument("--source", choices=SOURCE_TO_CODE, default="en")
+    p.add_argument("--data_dir", default=None,
+                    help="Defaults to data/flores200_eng or data/flores200_spa (see --source). "
+                         "Expects {lang}/dev.parquet (for decoding-setting dev-tuning) and "
                          "{lang}/devtest.parquet (held-out test).")
     p.add_argument("--output_dir", default="results/translations")
     p.add_argument("--setting", choices=GRID, default=None,
@@ -47,13 +51,16 @@ def parse_args():
                          "grid. 'default(beam5,lp1.0)' reproduces the paper's Table 7 baseline.")
     p.add_argument("--batch_size", type=int, default=16,
                     help="Sentences per generate() call. Lower it (e.g. 8) if the GPU runs out of memory.")
+    p.add_argument("--ipd", action="store_true",
+                    help="Also report AVLizador's corpus-level IPD (Valencian share of dialectally "
+                         "marked words) for both systems and the reference.")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     model_name = SCALE_TO_MODEL[args.scale]
-    data_dir = args.data_dir
+    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
     os.makedirs(args.output_dir, exist_ok=True)
 
     dev = pd.read_parquet(os.path.join(data_dir, args.lang, "dev.parquet")).iloc[:100]
@@ -62,7 +69,7 @@ def main():
     test_srcs, test_refs = devtest.src.astype(str).tolist(), devtest.ref.astype(str).tolist()
 
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang="eng_Latn")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang=SOURCE_TO_CODE[args.source])
     tgt_token_id = tokenizer.convert_tokens_to_ids(args.lang)
 
     def decode(model):
@@ -81,9 +88,14 @@ def main():
         os.path.join(args.output_dir, f"{args.lang}_vanilla.csv"), index=False)
     print(f"  Vanilla | setting={van_setting} | chrF++={van_chrf:.3f}")
 
-    summary = {"lang": args.lang, "scale": args.scale,
+    summary = {"lang": args.lang, "scale": args.scale, "source": args.source,
                "vanilla_setting": van_setting, "vanilla_chrf": van_chrf}
     summary_path = os.path.join(args.output_dir, f"{args.lang}_summary.json")
+    if args.ipd:
+        from src.ipd_reward import corpus_ipd
+        summary["reference_ipd"] = corpus_ipd(test_refs)
+        summary["vanilla_ipd"] = corpus_ipd(van_hyps)
+        print(f"  IPD | reference={summary['reference_ipd']['ipd']} | vanilla={summary['vanilla_ipd']['ipd']}")
 
     if args.adapter_path is None:
         with open(summary_path, "w") as f:
@@ -103,6 +115,9 @@ def main():
     print(f"\nchrF++ gain: {trained_chrf - van_chrf:+.3f}")
     summary.update(adapter_path=args.adapter_path, trained_setting=trained_setting,
                    trained_chrf=trained_chrf, chrf_gain=trained_chrf - van_chrf)
+    if args.ipd:
+        summary["trained_ipd"] = corpus_ipd(trained_hyps)
+        print(f"  IPD | trained={summary['trained_ipd']['ipd']}")
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
     torch.cuda.empty_cache()

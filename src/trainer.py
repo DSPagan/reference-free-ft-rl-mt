@@ -47,7 +47,7 @@ def get_log_probs(model, tokenizer, input_ids, attention_mask, gen_ids):
 
 
 def train_step(actor, tokenizer, rewarder, optimizer, src_text, lang, temp_controller,
-               k=12, max_new_tokens=64, kl_beta=0.001):
+               k=12, max_new_tokens=64, kl_beta=0.001, src_lang="eng_Latn"):
     """
     One GRPO update: sample K hypotheses, score them, take a single clipped-surrogate +
     KL-penalized gradient step.
@@ -66,7 +66,7 @@ def train_step(actor, tokenizer, rewarder, optimizer, src_text, lang, temp_contr
     k3 estimator. Every reported result was trained with this exact formula; it is kept
     as-is for faithful reproduction rather than silently "corrected" after the fact.
     """
-    tokenizer.src_lang = "eng_Latn"
+    tokenizer.src_lang = src_lang
     tokenizer.tgt_lang = lang
     tgt_token_id = tokenizer.convert_tokens_to_ids(lang)
     inputs = tokenizer(src_text, return_tensors="pt").to(DEVICE)
@@ -114,10 +114,11 @@ def train_step(actor, tokenizer, rewarder, optimizer, src_text, lang, temp_contr
     return loss_val, avg_reward_raw, kl_val, current_temp
 
 
-def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size=8, max_new_tokens=128):
+def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size=8, max_new_tokens=128,
+                      src_lang="eng_Latn"):
     """Cheap, sparse chrF++ check used only to pick the best checkpoint during training."""
     actor.eval()
-    tokenizer.src_lang = "eng_Latn"
+    tokenizer.src_lang = src_lang
     tgt_token_id = tokenizer.convert_tokens_to_ids(lang)
     samples = df_eval.sample(n=min(n_samples, len(df_eval)), random_state=42)
     srcs, refs, hyps = samples["src"].tolist(), samples["ref"].tolist(), []
@@ -136,7 +137,7 @@ def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size
 def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, out_dir,
                   n_epochs=3, lr=5e-6, k=12, max_new_tokens_train=64, max_new_tokens_eval=128,
                   kl_beta=0.001, eval_every=50, eval_n_samples=100,
-                  eval_batch_size=8, temp_kwargs=None):
+                  eval_batch_size=8, temp_kwargs=None, src_lang="eng_Latn"):
     """
     Trains for n_epochs over df_train, intermediate-eval'ing every eval_every steps and
     saving the single highest-chrF++ checkpoint to {out_dir}/adapters_best/{lang}/.
@@ -158,13 +159,13 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
         for row in pbar:
             loss_val, reward_raw, kl_val, temp = train_step(
                 actor, tokenizer, rewarder, optimizer, row.src, lang, temp_controller,
-                k=k, max_new_tokens=max_new_tokens_train, kl_beta=kl_beta,
+                k=k, max_new_tokens=max_new_tokens_train, kl_beta=kl_beta, src_lang=src_lang,
             )
 
             chrf_val = None
             if global_step % eval_every == 0 and global_step > 0:
                 chrf_val = intermediate_eval(actor, tokenizer, df_eval, lang, eval_n_samples,
-                                              eval_batch_size, max_new_tokens_eval)
+                                              eval_batch_size, max_new_tokens_eval, src_lang)
                 if chrf_val > best_chrf:
                     best_chrf, best_step = chrf_val, global_step
                     os.makedirs(best_adapter_path, exist_ok=True)

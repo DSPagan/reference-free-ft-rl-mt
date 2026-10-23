@@ -25,6 +25,11 @@ dependencies = [
     "tqdm",
     # torchmetrics 0.10 (pinned by unbabel-comet) imports pkg_resources, dropped in setuptools 81.
     "setuptools<81",
+    # AVLizador's IPD reward (third_party/AVLizador) POS-tags with spaCy's Catalan model.
+    "spacy==3.8.7",
+    "ca-core-news-md",
+    # spaCy 3.8 imports click, which recent typer releases no longer pull in.
+    "click==8.5.0",
 ]
 
 [tool.uv]
@@ -38,3 +43,4 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
+ca-core-news-md = { url = "https://github.com/explosion/spacy-models/releases/download/ca_core_news_md-3.8.0/ca_core_news_md-3.8.0-py3-none-any.whl" }

@@ -3,10 +3,12 @@ Builds the FLORES-200 parquet files main.py / generate_translations.py expect, d
 the per-language parquet files from the HuggingFace dataset facebook/flores
 (data/language/{lang}/{split}-00000-of-00001.parquet, aligned by row order).
 
-English source (eng_Latn). Writes to data/flores200_eng/{target_lang}/{split}.parquet.
+Writes to data/flores200_<src>/{target_lang}/{split}.parquet -- a separate tree per
+source language (eng_Latn -> data/flores200_eng, spa_Latn -> data/flores200_spa).
 
 Usage:
-    uv run python prepare_data.py --languages eus_Latn ...
+    uv run python prepare_data.py --source eng_Latn --languages cat_Latn
+    uv run python prepare_data.py --source spa_Latn --languages cat_Latn
 """
 import argparse
 import os
@@ -15,14 +17,13 @@ import pandas as pd
 from huggingface_hub import hf_hub_download
 
 HF_REPO = "facebook/flores"
-SOURCE = "eng_Latn"
 SPLITS = ["dev", "devtest"]
 
 LANGUAGES = [
     "eus_Latn", "swh_Latn", "bod_Tibt", "tur_Latn", "jpn_Jpan", "zho_Hant", "zho_Hans",
     "yor_Latn", "arb_Arab", "bel_Cyrl", "ben_Beng", "ces_Latn", "pol_Latn",
     "ell_Grek", "kor_Hang", "tha_Thai", "heb_Hebr", "hye_Armn", "kat_Geor", "amh_Ethi",
-    "khm_Khmr", "mar_Deva", "fin_Latn", "tam_Taml", "khk_Cyrl", "plt_Latn",
+    "khm_Khmr", "mar_Deva", "fin_Latn", "tam_Taml", "khk_Cyrl", "plt_Latn", "cat_Latn",
 ]
 
 
@@ -39,14 +40,16 @@ def load_sentences(lang, split):
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument("--source", default="eng_Latn", choices=["eng_Latn", "spa_Latn"])
     p.add_argument("--languages", nargs="+", default=LANGUAGES)
-    p.add_argument("--out_dir", default="data/flores200_eng")
+    p.add_argument("--out_dir", default=None,
+                    help="Defaults to data/flores200_<src_3letter>, e.g. data/flores200_eng")
     args = p.parse_args()
 
-    out_dir = args.out_dir
+    out_dir = args.out_dir or f"data/flores200_{args.source.split('_')[0]}"
 
     for split in SPLITS:
-        src_sents = load_sentences(SOURCE, split)
+        src_sents = load_sentences(args.source, split)
         if src_sents is None:
             continue
 

@@ -1,0 +1,3 @@
+[submodule "third_party/AVLizador"]
+	path = third_party/AVLizador
+	url = https://github.com/transducens/AVLizador.git

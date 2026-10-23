@@ -1,10 +1,11 @@
 """
-Trains one GRPO adapter for one language (English source). Single run per invocation.
+Trains one GRPO adapter for one language pair. Single run per invocation.
 
 Usage:
-    uv run python main.py --lang eus_Latn --scale 600m
+    uv run python main.py --lang eus_Latn --scale 600m                          # paper's hybrid reward
+    uv run python main.py --lang cat_Latn --scale 600m --source es --reward ipd   # Valencian (IPD) reward
 
-Outputs, under --output_dir (default results/{lang}_{scale}):
+Outputs, under --output_dir (default results/{lang}_{scale}_{source}_{reward}):
     adapters_best/{lang}/   -- highest-intermediate-chrF++ checkpoint (what the paper
                                 evaluates; load this with generate_translations.py)
     adapters/{lang}/        -- final-step adapter
@@ -18,27 +19,34 @@ import os
 import pandas as pd
 import torch
 
+from transformers import AutoTokenizer
+
 from src.models import load_actor
-from src.reward import GRPORewarder, RewardResources
 from src.trainer import TrainingLogger, run_training
 
 SCALE_TO_MODEL = {
     "600m": "facebook/nllb-200-distilled-600M",
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
-DATA_DIR = "data/flores200_eng"
+SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
+SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
+REWARDS = ("hybrid", "ipd")
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train one GRPO adapter for one language.")
     p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. eus_Latn")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
-    p.add_argument("--data_dir", default=DATA_DIR,
-                    help="Expects {lang}/dev.parquet (columns src, ref), built by "
-                         "prepare_data.py. Used for both training and the sparse "
-                         "intermediate chrF++ eval.")
-    p.add_argument("--output_dir", default=None, help="Defaults to results/{lang}_{scale}")
+    p.add_argument("--source", choices=SOURCE_TO_CODE, default="en")
+    p.add_argument("--data_dir", default=None,
+                    help="Defaults to data/flores200_eng or data/flores200_spa (see --source). "
+                         "Expects {lang}/dev.parquet (columns src, ref), built by prepare_data.py. "
+                         "Used for both training and the sparse intermediate chrF++ eval.")
+    p.add_argument("--output_dir", default=None, help="Defaults to results/{lang}_{scale}_{source}_{reward}")
 
+    p.add_argument("--reward", choices=REWARDS, default="hybrid",
+                    help="hybrid: the paper's LaBSE + COMET-Kiwi reward. ipd: AVLizador's dialectal "
+                         "purity index (Valencian share of marked words; 0 when none is marked).")
     p.add_argument("--labse_weight", type=float, default=0.5,
                     help="Hybrid-reward blend: reward = w*LaBSE + (1-w)*COMET-Kiwi. The paper uses 0.5.")
 
@@ -79,7 +87,8 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
 
     model_name = SCALE_TO_MODEL[args.scale]
-    out_dir = args.output_dir or f"results/{args.lang}_{args.scale}"
+    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
+    out_dir = args.output_dir or f"results/{args.lang}_{args.scale}_{args.source}_{args.reward}"
     os.makedirs(out_dir, exist_ok=True)
 
     with open(os.path.join(out_dir, "config.txt"), "w") as f:
@@ -87,7 +96,7 @@ def main():
             f.write(f"{k}: {v}\n")
         f.write(f"model_name: {model_name}\n")
 
-    dev_path = os.path.join(args.data_dir, args.lang, "dev.parquet")
+    dev_path = os.path.join(data_dir, args.lang, "dev.parquet")
     if not os.path.exists(dev_path):
         raise FileNotFoundError(f"No training/eval data at {dev_path}")
     df_train = pd.read_parquet(dev_path)
@@ -95,24 +104,31 @@ def main():
         df_train = df_train.iloc[:args.n_segments]
     df_eval = df_train  # same FLORES-200 dev split; intermediate eval is sparse and sampled
 
-    print(f"\n{'=' * 60}\n  Language:    {args.lang}\n  Model:       {model_name}\n"
-          f"  Reward:      hybrid (w={args.labse_weight})\n  Epochs:      {args.n_epochs} "
+    reward_desc = f"hybrid (w={args.labse_weight})" if args.reward == "hybrid" else "ipd"
+    print(f"\n{'=' * 60}\n  Language:    {SOURCE_TO_CODE[args.source]} -> {args.lang}\n"
+          f"  Model:       {model_name}\n  Reward:      {reward_desc}\n  Epochs:      {args.n_epochs} "
           f"({len(df_train)} sentences/epoch)\n  Output:      {out_dir}\n{'=' * 60}\n")
 
-    resources = RewardResources(model_name)
-    rewarder = GRPORewarder(resources, args.labse_weight)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if args.reward == "ipd":
+        from src.ipd_reward import IPDRewarder
+        rewarder = IPDRewarder()
+    else:
+        from src.reward import GRPORewarder, RewardResources
+        rewarder = GRPORewarder(RewardResources(), args.labse_weight)
     logger = TrainingLogger(os.path.join(out_dir, "training_metrics.csv"))
     actor = load_actor(model_name, args.lora_r, args.lora_alpha, args.lora_dropout)
 
     try:
         best_chrf, best_step = run_training(
-            actor, resources.tokenizer, rewarder, logger, df_train, df_eval, args.lang, out_dir,
+            actor, tokenizer, rewarder, logger, df_train, df_eval, args.lang, out_dir,
             n_epochs=args.n_epochs, lr=args.lr, k=args.k,
             max_new_tokens_train=args.max_new_tokens_train, max_new_tokens_eval=args.max_new_tokens_eval,
             kl_beta=args.kl_beta, eval_every=args.eval_every,
             eval_n_samples=args.eval_n_samples, eval_batch_size=args.eval_batch_size,
             temp_kwargs=dict(initial=args.temp_initial, max_temp=args.temp_max, step=args.temp_step,
                               patience=args.temp_patience, cooldown=args.temp_cooldown),
+            src_lang=SOURCE_TO_CODE[args.source],
         )
     finally:
         logger.close()
@@ -130,7 +146,8 @@ def main():
     print(f"  adapters/{args.lang}/       -- final-step adapter")
     print("  training_metrics.csv        -- per-step training log")
     print("\nEvaluate with: uv run python generate_translations.py "
-          f"--adapter_path {out_dir}/adapters_best/{args.lang} --lang {args.lang} --scale {args.scale}")
+          f"--adapter_path {out_dir}/adapters_best/{args.lang} --lang {args.lang} --scale {args.scale} "
+          f"--source {args.source}")
 
 
 if __name__ == "__main__":
