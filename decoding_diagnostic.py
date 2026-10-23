@@ -23,6 +23,7 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 from metrics.chrf import chrf_corpus
 from metrics.decoding import GRID, translate
+from src.data import DATASETS, resolve_data_dir
 from src.models import DEVICE, load_vanilla_model
 
 SCALE_TO_MODEL = {
@@ -30,7 +31,6 @@ SCALE_TO_MODEL = {
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
 SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
-SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 PRECISIONS = ("4bit", "fp32")
 # The fair-decoding grid plus the setting src/trainer.py's intermediate eval uses, which
 # matches the paper's Table 6 "Max tokens (eval) 128".
@@ -45,9 +45,11 @@ def parse_args():
     p.add_argument("--precisions", nargs="+", choices=PRECISIONS, default=list(PRECISIONS))
     p.add_argument("--batch_size", type=int, default=16,
                     help="Lower it (e.g. 8) if fp32 runs out of GPU memory.")
+    p.add_argument("--dataset", choices=DATASETS, default="flores")
     p.add_argument("--data_dir", default=None)
     p.add_argument("--output_dir", default=None,
-                    help="Defaults to results/baseline/diagnostic/{scale}_{source}")
+                    help="Defaults to results/baseline/diagnostic/{scale}_{source}, with a _{dataset} "
+                         "suffix for datasets other than flores")
     return p.parse_args()
 
 
@@ -60,8 +62,9 @@ def load_model(model_name, precision):
 def main():
     args = parse_args()
     model_name = SCALE_TO_MODEL[args.scale]
-    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
-    out_dir = args.output_dir or f"results/baseline/diagnostic/{args.scale}_{args.source}"
+    data_dir = resolve_data_dir(args.dataset, args.source, args.data_dir)
+    suffix = "" if args.dataset == "flores" else f"_{args.dataset}"
+    out_dir = args.output_dir or f"results/baseline/diagnostic/{args.scale}_{args.source}{suffix}"
     os.makedirs(out_dir, exist_ok=True)
 
     devtest = pd.read_parquet(os.path.join(data_dir, args.lang, "devtest.parquet"))

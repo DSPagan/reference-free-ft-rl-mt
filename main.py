@@ -4,8 +4,9 @@ Trains one GRPO adapter for one language pair. Single run per invocation.
 Usage:
     uv run python main.py --lang eus_Latn --scale 600m                          # paper's hybrid reward
     uv run python main.py --lang cat_Latn --scale 600m --source es --reward ipd   # Valencian (IPD) reward
+    uv run python main.py --lang cat_Latn --scale 600m --dataset uji --reward ipd # UJI corpus, en -> Valencian
 
-Outputs, under --output_dir (default results/{lang}_{scale}_{source}_{reward}):
+Outputs, under --output_dir (default results/{lang}_{scale}_{source}_{reward}[_{dataset}]):
     adapters_best/{lang}/   -- highest-intermediate-chrF++ checkpoint (what the paper
                                 evaluates; load this with generate_translations.py)
     adapters/{lang}/        -- final-step adapter
@@ -21,6 +22,7 @@ import torch
 
 from transformers import AutoTokenizer
 
+from src.data import DATASETS, resolve_data_dir
 from src.models import load_actor
 from src.trainer import TrainingLogger, run_training
 
@@ -29,7 +31,6 @@ SCALE_TO_MODEL = {
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
 SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
-SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 REWARDS = ("hybrid", "ipd")
 
 
@@ -38,11 +39,22 @@ def parse_args():
     p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. eus_Latn")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
     p.add_argument("--source", choices=SOURCE_TO_CODE, default="en")
+    p.add_argument("--dataset", choices=DATASETS, default="flores",
+                    help="flores: FLORES-200 (prepare_data.py). uji: UJI Valencian-English news corpus, "
+                         "English source and Valencian references (prepare_uji.py).")
     p.add_argument("--data_dir", default=None,
-                    help="Defaults to data/flores200_eng or data/flores200_spa (see --source). "
-                         "Expects {lang}/dev.parquet (columns src, ref), built by prepare_data.py. "
-                         "Used for both training and the sparse intermediate chrF++ eval.")
-    p.add_argument("--output_dir", default=None, help="Defaults to results/{lang}_{scale}_{source}_{reward}")
+                    help="Defaults to the dataset's directory for --source (data/flores200_eng, "
+                         "data/flores200_spa or data/uji_eng). Expects {lang}/{split}.parquet "
+                         "(columns src, ref).")
+    p.add_argument("--train_split", default=None,
+                    help="Split trained on. Defaults to dev for flores and train for uji.")
+    p.add_argument("--eval_split", default=None,
+                    help="Split the sparse intermediate chrF++ eval samples from (picks adapters_best). "
+                         "Defaults to dev for both datasets; when it equals --train_split the "
+                         "(--n_segments-truncated) training data is reused, as in the paper's setup.")
+    p.add_argument("--output_dir", default=None,
+                    help="Defaults to results/{lang}_{scale}_{source}_{reward}, with a _{dataset} "
+                         "suffix for datasets other than flores")
 
     p.add_argument("--reward", choices=REWARDS, default="hybrid",
                     help="hybrid: the paper's LaBSE + COMET-Kiwi reward. ipd: AVLizador's dialectal "
@@ -87,27 +99,40 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
 
     model_name = SCALE_TO_MODEL[args.scale]
-    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
-    out_dir = args.output_dir or f"results/{args.lang}_{args.scale}_{args.source}_{args.reward}"
+    data_dir = resolve_data_dir(args.dataset, args.source, args.data_dir)
+    train_split = args.train_split or DATASETS[args.dataset]["train_split"]
+    eval_split = args.eval_split or DATASETS[args.dataset]["eval_split"]
+    suffix = "" if args.dataset == "flores" else f"_{args.dataset}"
+    out_dir = args.output_dir or f"results/{args.lang}_{args.scale}_{args.source}_{args.reward}{suffix}"
     os.makedirs(out_dir, exist_ok=True)
 
     with open(os.path.join(out_dir, "config.txt"), "w") as f:
         for k, v in sorted(vars(args).items()):
             f.write(f"{k}: {v}\n")
         f.write(f"model_name: {model_name}\n")
+        f.write(f"resolved_data_dir: {data_dir}\n")
+        f.write(f"resolved_train_split: {train_split}\n")
+        f.write(f"resolved_eval_split: {eval_split}\n")
 
-    dev_path = os.path.join(data_dir, args.lang, "dev.parquet")
-    if not os.path.exists(dev_path):
-        raise FileNotFoundError(f"No training/eval data at {dev_path}")
-    df_train = pd.read_parquet(dev_path)
+    def load_split(split):
+        path = os.path.join(data_dir, args.lang, f"{split}.parquet")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No training/eval data at {path}")
+        return pd.read_parquet(path)
+
+    df_train = load_split(train_split)
     if args.n_segments:
         df_train = df_train.iloc[:args.n_segments]
-    df_eval = df_train  # same FLORES-200 dev split; intermediate eval is sparse and sampled
+    # FLORES-200: eval and train are the same dev split (intermediate eval is sparse and sampled).
+    # UJI: eval is a held-out dev split, so the best checkpoint is not picked on training data.
+    df_eval = df_train if eval_split == train_split else load_split(eval_split)
 
     reward_desc = f"hybrid (w={args.labse_weight})" if args.reward == "hybrid" else "ipd"
     print(f"\n{'=' * 60}\n  Language:    {SOURCE_TO_CODE[args.source]} -> {args.lang}\n"
-          f"  Model:       {model_name}\n  Reward:      {reward_desc}\n  Epochs:      {args.n_epochs} "
-          f"({len(df_train)} sentences/epoch)\n  Output:      {out_dir}\n{'=' * 60}\n")
+          f"  Model:       {model_name}\n  Reward:      {reward_desc}\n  Data:        {args.dataset} "
+          f"(train={train_split}, eval={eval_split}, {len(df_eval)} eval rows)\n"
+          f"  Epochs:      {args.n_epochs} ({len(df_train)} sentences/epoch)\n"
+          f"  Output:      {out_dir}\n{'=' * 60}\n")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if args.reward == "ipd":
@@ -147,7 +172,7 @@ def main():
     print("  training_metrics.csv        -- per-step training log")
     print("\nEvaluate with: uv run python generate_translations.py "
           f"--adapter_path {out_dir}/adapters_best/{args.lang} --lang {args.lang} --scale {args.scale} "
-          f"--source {args.source}")
+          f"--source {args.source} --dataset {args.dataset}" + (" --ipd" if args.lang == "cat_Latn" else ""))
 
 
 if __name__ == "__main__":

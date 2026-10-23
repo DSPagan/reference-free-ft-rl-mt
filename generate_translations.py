@@ -24,6 +24,7 @@ from peft import PeftModel
 
 from metrics.chrf import chrf_corpus
 from metrics.decoding import GRID, fair_decode, translate
+from src.data import DATASETS, resolve_data_dir
 from src.models import load_vanilla_model
 
 SCALE_TO_MODEL = {
@@ -31,7 +32,6 @@ SCALE_TO_MODEL = {
     "1.3b": "facebook/nllb-200-distilled-1.3B",
 }
 SOURCE_TO_CODE = {"en": "eng_Latn", "es": "spa_Latn"}
-SOURCE_TO_DATA_DIR = {"en": "data/flores200_eng", "es": "data/flores200_spa"}
 
 
 def parse_args():
@@ -41,11 +41,16 @@ def parse_args():
     p.add_argument("--lang", required=True, help="FLORES-200 target language code, e.g. eus_Latn")
     p.add_argument("--scale", choices=SCALE_TO_MODEL, default="600m")
     p.add_argument("--source", choices=SOURCE_TO_CODE, default="en")
+    p.add_argument("--dataset", choices=DATASETS, default="flores",
+                    help="flores: FLORES-200. uji: UJI Valencian-English news corpus (English source, "
+                         "Valencian references; build it with prepare_uji.py).")
     p.add_argument("--data_dir", default=None,
-                    help="Defaults to data/flores200_eng or data/flores200_spa (see --source). "
-                         "Expects {lang}/dev.parquet (for decoding-setting dev-tuning) and "
-                         "{lang}/devtest.parquet (held-out test).")
-    p.add_argument("--output_dir", default="results/translations")
+                    help="Defaults to the dataset's directory for --source (data/flores200_eng, "
+                         "data/flores200_spa or data/uji_eng). Expects {lang}/dev.parquet (for "
+                         "decoding-setting dev-tuning) and {lang}/devtest.parquet (held-out test).")
+    p.add_argument("--output_dir", default=None,
+                    help="Defaults to results/translations, or results/translations_{dataset} for "
+                         "datasets other than flores (so runs on different data never overwrite each other).")
     p.add_argument("--setting", choices=GRID, default=None,
                     help="Decode both systems with this fixed setting instead of dev-tuning the "
                          "grid. 'default(beam5,lp1.0)' reproduces the paper's Table 7 baseline.")
@@ -60,7 +65,9 @@ def parse_args():
 def main():
     args = parse_args()
     model_name = SCALE_TO_MODEL[args.scale]
-    data_dir = args.data_dir or SOURCE_TO_DATA_DIR[args.source]
+    data_dir = resolve_data_dir(args.dataset, args.source, args.data_dir)
+    if args.output_dir is None:
+        args.output_dir = "results/translations" + ("" if args.dataset == "flores" else f"_{args.dataset}")
     os.makedirs(args.output_dir, exist_ok=True)
 
     dev = pd.read_parquet(os.path.join(data_dir, args.lang, "dev.parquet")).iloc[:100]
@@ -88,7 +95,7 @@ def main():
         os.path.join(args.output_dir, f"{args.lang}_vanilla.csv"), index=False)
     print(f"  Vanilla | setting={van_setting} | chrF++={van_chrf:.3f}")
 
-    summary = {"lang": args.lang, "scale": args.scale, "source": args.source,
+    summary = {"lang": args.lang, "scale": args.scale, "source": args.source, "dataset": args.dataset,
                "vanilla_setting": van_setting, "vanilla_chrf": van_chrf}
     summary_path = os.path.join(args.output_dir, f"{args.lang}_summary.json")
     if args.ipd:
