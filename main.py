@@ -11,10 +11,17 @@ Outputs, under --output_dir (default results/{lang}_{scale}_{source}_{reward}[_{
                                 evaluates; load this with generate_translations.py)
     adapters/{lang}/        -- final-step adapter
     training_metrics.csv    -- per-step loss/reward/KL/temperature log
+    eval_metrics.csv        -- every --eval_every steps (plus before step 0 and after the last
+                                step): chrF++, BLEU, IPD and COMET-Kiwi on the eval subset, to
+                                plot how the model evolves. Monitoring only; chrF++ alone picks
+                                adapters_best and none of them enters the GRPO reward
+    eval_reference.json     -- the same metrics for the references themselves (IPD / COMET-Kiwi
+                                ceiling for the plots)
     config.txt              -- resolved run configuration, for reproducibility
 """
 import argparse
 import gc
+import json
 import os
 
 import pandas as pd
@@ -23,8 +30,9 @@ import torch
 from transformers import AutoTokenizer
 
 from src.data import DATASETS, resolve_data_dir
+from src.eval_metrics import COLUMNS, OPTIONAL_METRICS, EvalMetrics
 from src.models import load_actor
-from src.trainer import TrainingLogger, run_training
+from src.trainer import EvalLogger, TrainingLogger, eval_sample, run_training
 
 SCALE_TO_MODEL = {
     "600m": "facebook/nllb-200-distilled-600M",
@@ -70,7 +78,13 @@ def parse_args():
     p.add_argument("--max_new_tokens_eval", type=int, default=128)
     p.add_argument("--eval_every", type=int, default=50)
     p.add_argument("--eval_n_samples", type=int, default=100)
-    p.add_argument("--eval_batch_size", type=int, default=8)
+    p.add_argument("--eval_batch_size", type=int, default=8,
+                    help="Sentences per generate() call (and per COMET-Kiwi batch) in the intermediate eval.")
+    p.add_argument("--eval_metrics", nargs="*", choices=OPTIONAL_METRICS, default=None,
+                    help="Extra monitoring metrics logged to eval_metrics.csv next to chrF++ (which is "
+                         "always computed). Default: bleu, comet, and ipd when --lang is cat_Latn. "
+                         "Pass the flag with no values to log chrF++ only. comet needs the gated "
+                         "COMET-Kiwi model (HF_TOKEN) and, with --reward ipd, its GPU memory.")
 
     p.add_argument("--lora_r", type=int, default=16)
     p.add_argument("--lora_alpha", type=int, default=32)
@@ -127,21 +141,49 @@ def main():
     # UJI: eval is a held-out dev split, so the best checkpoint is not picked on training data.
     df_eval = df_train if eval_split == train_split else load_split(eval_split)
 
+    if "ref" not in df_eval.columns:
+        raise ValueError("the intermediate eval (chrF++, which picks adapters_best) needs a parallel "
+                         f"corpus: no 'ref' column in the {eval_split} split")
+    if args.eval_metrics is None:
+        eval_metrics = ["bleu", "comet"] + (["ipd"] if args.lang == "cat_Latn" else [])
+    else:
+        eval_metrics = args.eval_metrics
+    if "ipd" in eval_metrics and args.lang != "cat_Latn":
+        raise ValueError("the ipd eval metric only makes sense for Catalan targets (--lang cat_Latn)")
+
     reward_desc = f"hybrid (w={args.labse_weight})" if args.reward == "hybrid" else "ipd"
     print(f"\n{'=' * 60}\n  Language:    {SOURCE_TO_CODE[args.source]} -> {args.lang}\n"
           f"  Model:       {model_name}\n  Reward:      {reward_desc}\n  Data:        {args.dataset} "
           f"(train={train_split}, eval={eval_split}, {len(df_eval)} eval rows)\n"
           f"  Epochs:      {args.n_epochs} ({len(df_train)} sentences/epoch)\n"
+          f"  Eval:        every {args.eval_every} steps on {min(args.eval_n_samples, len(df_eval))} "
+          f"sentences: chrf{''.join(', ' + m for m in eval_metrics)}\n"
           f"  Output:      {out_dir}\n{'=' * 60}\n")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    comet_model = None
     if args.reward == "ipd":
         from src.ipd_reward import IPDRewarder
         rewarder = IPDRewarder()
     else:
         from src.reward import GRPORewarder, RewardResources
-        rewarder = GRPORewarder(RewardResources(), args.labse_weight)
+        resources = RewardResources()
+        rewarder = GRPORewarder(resources, args.labse_weight)
+        comet_model = resources.comet_kiwi  # already loaded for the reward: reuse it for the eval
+    if "comet" in eval_metrics and comet_model is None:
+        from src.reward import load_comet_kiwi
+        comet_model = load_comet_kiwi()
+    evaluator = EvalMetrics(eval_metrics, comet_model, comet_batch_size=args.eval_batch_size)
+
+    # What the references themselves score on the eval subset: the ceiling for the plots.
+    ref_sample = eval_sample(df_eval, args.eval_n_samples)
+    ref_metrics = evaluator.compute(ref_sample["src"].tolist(), ref_sample["ref"].tolist(),
+                                    ref_sample["ref"].tolist())
+    with open(os.path.join(out_dir, "eval_reference.json"), "w") as f:
+        json.dump({k: v for k, v in ref_metrics.items() if k not in ("chrf", "bleu")}, f, indent=2)
+
     logger = TrainingLogger(os.path.join(out_dir, "training_metrics.csv"))
+    eval_logger = EvalLogger(os.path.join(out_dir, "eval_metrics.csv"), COLUMNS)
     actor = load_actor(model_name, args.lora_r, args.lora_alpha, args.lora_dropout)
 
     try:
@@ -153,10 +195,11 @@ def main():
             eval_n_samples=args.eval_n_samples, eval_batch_size=args.eval_batch_size,
             temp_kwargs=dict(initial=args.temp_initial, max_temp=args.temp_max, step=args.temp_step,
                               patience=args.temp_patience, cooldown=args.temp_cooldown),
-            src_lang=SOURCE_TO_CODE[args.source],
+            src_lang=SOURCE_TO_CODE[args.source], evaluator=evaluator, eval_logger=eval_logger,
         )
     finally:
         logger.close()
+        eval_logger.close()
 
     final_adapter_path = os.path.join(out_dir, "adapters", args.lang)
     os.makedirs(final_adapter_path, exist_ok=True)
@@ -170,6 +213,7 @@ def main():
     print(f"  adapters_best/{args.lang}/  -- best checkpoint (chrF++={best_chrf:.4f} @ step {best_step})")
     print(f"  adapters/{args.lang}/       -- final-step adapter")
     print("  training_metrics.csv        -- per-step training log")
+    print("  eval_metrics.csv            -- chrF++/BLEU/IPD/COMET-Kiwi evolution on the eval subset")
     print("\nEvaluate with: uv run python generate_translations.py "
           f"--adapter_path {out_dir}/adapters_best/{args.lang} --lang {args.lang} --scale {args.scale} "
           f"--source {args.source} --dataset {args.dataset}" + (" --ipd" if args.lang == "cat_Latn" else ""))

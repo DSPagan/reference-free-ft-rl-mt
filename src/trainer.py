@@ -35,6 +35,27 @@ class TrainingLogger:
         self._file.close()
 
 
+class EvalLogger:
+    """One row per intermediate evaluation (see src/eval_metrics.py), for plotting the
+    evolution of the model. Step 0 / epoch 0 is the model before any update."""
+
+    def __init__(self, filepath, columns):
+        write_header = not os.path.exists(filepath) or os.path.getsize(filepath) == 0
+        self.columns = columns
+        self._file = open(filepath, "a", newline="")
+        self._writer = csv.writer(self._file)
+        if write_header:
+            self._writer.writerow(["lang", "step", "epoch", "n_samples", *columns])
+
+    def log(self, lang, step, epoch, n_samples, metrics):
+        row = [round(metrics[c], 6) if metrics.get(c) is not None else "" for c in self.columns]
+        self._writer.writerow([lang, step, epoch, n_samples, *row])
+        self._file.flush()
+
+    def close(self):
+        self._file.close()
+
+
 def get_log_probs(model, tokenizer, input_ids, attention_mask, gen_ids):
     """Mean per-token log-probability (length-normalized) of gen_ids under `model`."""
     outputs = model(input_ids=input_ids, attention_mask=attention_mask,
@@ -114,13 +135,23 @@ def train_step(actor, tokenizer, rewarder, optimizer, src_text, lang, temp_contr
     return loss_val, avg_reward_raw, kl_val, current_temp
 
 
+def eval_sample(df_eval, n_samples=100):
+    """The fixed (seeded) subset of df_eval every intermediate eval translates, so the
+    metrics are comparable across steps."""
+    return df_eval.sample(n=min(n_samples, len(df_eval)), random_state=42)
+
+
 def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size=8, max_new_tokens=128,
-                      src_lang="eng_Latn"):
-    """Cheap, sparse chrF++ check used only to pick the best checkpoint during training."""
+                      src_lang="eng_Latn", evaluator=None):
+    """
+    Cheap, sparse eval on a fixed subset of df_eval (beam 4, no sampling). Returns a dict of
+    metrics: just {"chrf"} (what picks the best checkpoint) or, with an `evaluator`
+    (src.eval_metrics.EvalMetrics), also the extra monitoring metrics.
+    """
     actor.eval()
     tokenizer.src_lang = src_lang
     tgt_token_id = tokenizer.convert_tokens_to_ids(lang)
-    samples = df_eval.sample(n=min(n_samples, len(df_eval)), random_state=42)
+    samples = eval_sample(df_eval, n_samples)
     srcs, refs, hyps = samples["src"].tolist(), samples["ref"].tolist(), []
 
     for i in range(0, len(srcs), batch_size):
@@ -131,17 +162,30 @@ def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size
         hyps.extend(tokenizer.batch_decode(gen_ids, skip_special_tokens=True))
 
     torch.cuda.empty_cache()
-    return chrf_corpus(hyps, refs)
+    if evaluator is None:
+        return {"chrf": chrf_corpus(hyps, refs)}
+    return evaluator.compute(srcs, hyps, refs)
+
+
+def _fmt_metrics(m):
+    """Compact one-line summary of an intermediate-eval metrics dict for the console."""
+    names = {"chrf": "chrF", "bleu": "BLEU", "ipd": "IPD", "ipd_mean": "IPDmean", "comet_kiwi": "Kiwi"}
+    return " | ".join(f"{n}: {m[k]:.4f}" for k, n in names.items() if m.get(k) is not None)
 
 
 def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, out_dir,
                   n_epochs=3, lr=5e-6, k=12, max_new_tokens_train=64, max_new_tokens_eval=128,
                   kl_beta=0.001, eval_every=50, eval_n_samples=100,
-                  eval_batch_size=8, temp_kwargs=None, src_lang="eng_Latn"):
+                  eval_batch_size=8, temp_kwargs=None, src_lang="eng_Latn",
+                  evaluator=None, eval_logger=None):
     """
     Trains for n_epochs over df_train, intermediate-eval'ing every eval_every steps and
     saving the single highest-chrF++ checkpoint to {out_dir}/adapters_best/{lang}/.
     Returns (best_chrf, best_step).
+
+    With an `eval_logger` (EvalLogger), every intermediate eval's full metrics are also
+    written to it, plus an eval of the untrained model before step 0 and one after the last
+    step. Those two extra evals are monitoring only: they never pick the best checkpoint.
     """
     from src.temperature import TemperatureController
 
@@ -150,6 +194,17 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
     best_chrf, best_step = -float("inf"), -1
     best_adapter_path = os.path.join(out_dir, "adapters_best", lang)
     global_step = 0
+
+    def monitor_eval(step, epoch):
+        """Eval for the monitoring log only (not checkpoint selection)."""
+        m = intermediate_eval(actor, tokenizer, df_eval, lang, eval_n_samples, eval_batch_size,
+                              max_new_tokens_eval, src_lang, evaluator)
+        eval_logger.log(lang, step, epoch, min(eval_n_samples, len(df_eval)), m)
+        print(f"\n  Eval @ step {step} (ep{epoch}) | {_fmt_metrics(m)}")
+        actor.train()
+
+    if eval_logger is not None:
+        monitor_eval(0, 0)  # LoRA's B matrix starts at zero, so this is the vanilla model
 
     for epoch in range(n_epochs):
         if n_epochs > 1:
@@ -164,8 +219,12 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
 
             chrf_val = None
             if global_step % eval_every == 0 and global_step > 0:
-                chrf_val = intermediate_eval(actor, tokenizer, df_eval, lang, eval_n_samples,
-                                              eval_batch_size, max_new_tokens_eval, src_lang)
+                metrics = intermediate_eval(actor, tokenizer, df_eval, lang, eval_n_samples,
+                                             eval_batch_size, max_new_tokens_eval, src_lang, evaluator)
+                chrf_val = metrics["chrf"]
+                if eval_logger is not None:
+                    eval_logger.log(lang, global_step, epoch + 1, min(eval_n_samples, len(df_eval)), metrics)
+                    print(f"\n  Eval @ step {global_step} | {_fmt_metrics(metrics)}")
                 if chrf_val > best_chrf:
                     best_chrf, best_step = chrf_val, global_step
                     os.makedirs(best_adapter_path, exist_ok=True)
@@ -183,6 +242,10 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
                                    "kl": f"{kl_val:.4f}", "temp": f"{temp:.2f}", "best": f"{best_chrf:.2f}"})
             global_step += 1
             torch.cuda.empty_cache()
+
+    last_step = global_step - 1
+    if eval_logger is not None and last_step > 0 and last_step % eval_every != 0:
+        monitor_eval(last_step, n_epochs)  # the last step was not already an eval step
 
     print(f"\n  Training complete. Total steps: {global_step}")
     print(f"  Best chrF: {best_chrf:.4f} at step {best_step}")
