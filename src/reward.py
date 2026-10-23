@@ -10,13 +10,19 @@ from sentence_transformers import SentenceTransformer
 from src.models import DEVICE
 
 
+def load_comet_kiwi():
+    """COMET-Kiwi (reference-free QE), the reward's COMET half and the training-time eval metric."""
+    print("Loading COMET-Kiwi (reference-free)...")
+    model = load_from_checkpoint(download_model("Unbabel/wmt22-cometkiwi-da"))
+    model.eval()
+    return model
+
+
 class RewardResources:
     """Loads both reward models."""
 
     def __init__(self):
-        print("Loading COMET-Kiwi (reward model, reference-free)...")
-        self.comet_kiwi = load_from_checkpoint(download_model("Unbabel/wmt22-cometkiwi-da"))
-        self.comet_kiwi.eval()
+        self.comet_kiwi = load_comet_kiwi()
 
         print("Loading LaBSE...")
         self.labse = SentenceTransformer("sentence-transformers/LaBSE").to(DEVICE)
