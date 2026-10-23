@@ -15,6 +15,7 @@ towards Valencian. See [REPRODUCTION.md](REPRODUCTION.md) for our experiment log
 
 ```
 src/                  GRPO training package
+  data.py               dataset registry (FLORES-200, UJI): data dirs and default splits
   models.py             4-bit NLLB-200 base + rank-16 LoRA adapter loading
   reward.py             the reference-free hybrid reward (LaBSE + COMET-Kiwi)
   ipd_reward.py         the dialectal IPD reward and corpus-level IPD metric
@@ -29,6 +30,7 @@ generate_translations.py   Inference entry point -- loads an adapter, decodes, s
                         chrF++ against vanilla
 decoding_diagnostic.py Scores vanilla under every decoding setting, 4-bit and fp32
 prepare_data.py        Builds the FLORES-200 parquet files the above expect
+prepare_uji.py         Builds the train/dev/devtest parquet files from the UJI va-en corpus
 third_party/AVLizador  git submodule (pinned commit) providing the IPD
 slurm/run.sbatch       SLURM job wrapper for any of the scripts
 pyproject.toml, uv.lock   Python 3.10 environment, every dependency pinned
@@ -89,6 +91,11 @@ uv run python prepare_data.py --source spa_Latn --languages cat_Latn
 
 The FLORES-200 `cat_Latn` references are Eastern (IEC) Catalan, IPD ≈ 0.19, so chrF++
 against them does not reward Valencian output.
+
+The UJI Valencian–English news corpus (`data/va_en_uji/*.jsonl`) is converted by
+`prepare_uji.py` into `data/uji_eng/cat_Latn/{train,dev,devtest}.parquet` (English source,
+Valencian references, split by news article) and selected with `--dataset uji`. See
+[ADAPTACION_UJI.md](ADAPTACION_UJI.md) for the details and a full example.
 
 ## Training
 
