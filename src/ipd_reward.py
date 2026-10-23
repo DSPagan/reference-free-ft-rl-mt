@@ -47,13 +47,18 @@ class IPDRewarder:
 
 def corpus_ipd(texts):
     """Corpus-level IPD for evaluation: western / (western + eastern) pooled over all texts,
-    plus the number of texts with no marked word. Returns a dict."""
+    plus the number of texts with no marked word and the mean per-sentence IPD with unmarked
+    texts at 0 (what IPDRewarder gives by default, i.e. comparable to the training reward).
+    Returns a dict."""
     calcula_ipd, formes = _load_ipd()
     occ = ori = unmarked = 0
+    ipd_sum = 0.0
     for t in texts:
         r = calcula_ipd(t, formes)
         occ += r["total_occidentals"]
         ori += r["total_orientals"]
         unmarked += r["ipd"] is None
+        ipd_sum += 0.0 if r["ipd"] is None else r["ipd"]
     return {"ipd": occ / (occ + ori) if occ + ori else None, "western": occ, "eastern": ori,
-            "unmarked_sentences": unmarked, "sentences": len(texts)}
+            "unmarked_sentences": unmarked, "sentences": len(texts),
+            "mean_sentence_ipd": ipd_sum / len(texts) if texts else None}
