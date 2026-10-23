@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "GRPO fine-tuning of NLLB-200 with a reference-free LaBSE + COMET-Kiwi reward"
 readme = "README.md"
 authors = [
-    { name = "Daniel Sánchez Pagán", email = "dansanzpag@gmail.com" }
+    { name = "Daniel Sánchez Pagán", email = "dansanzpag@gmail.com" },
+    {name = "Miguel Alejandro Plana Torregrosa", email = "miguel.plana@gcloud.ua.es"}
 ]
 requires-python = "==3.10.*"
 dependencies = [
