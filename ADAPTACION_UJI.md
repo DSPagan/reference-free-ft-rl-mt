@@ -7,7 +7,9 @@ evaluar con el corpus UJI valenciano–inglés
 
 Los cambios son **retrocompatibles**: sin `--dataset`, `main.py`, `generate_translations.py`
 y `decoding_diagnostic.py` se comportan exactamente igual que antes (FLORES-200). No se ha
-tocado `src/trainer.py`, `src/reward.py`, `src/ipd_reward.py` ni `metrics/`.
+tocado `src/trainer.py`, `src/reward.py`, `src/ipd_reward.py` ni `metrics/` en las secciones
+1–6; la sección 7 describe un cambio posterior (métricas de seguimiento durante el
+entrenamiento) que sí los toca.
 
 ## 1. Planteamiento del experimento
 
@@ -199,8 +201,9 @@ README. Los flags de `--dataset uji` son los únicos nuevos; el resto de hiperpa
 4. **Selección de checkpoint.** `adapters_best` sigue siendo el de mayor chrF++ intermedio.
    Con referencias valencianas esto ya no choca con el IPD (la advertencia pendiente en
    REPRODUCTION.md aplicaba a FLORES), aunque sigue siendo una métrica distinta de la
-   recompensa. Si se quisiera seleccionar por IPD, habría que tocar `intermediate_eval` en
-   `src/trainer.py`, que no se ha modificado.
+   recompensa. Si se quisiera seleccionar por IPD, habría que cambiar la comparación
+   `chrf_val > best_chrf` en `run_training` (`src/trainer.py`); la sección 7 ya registra el
+   IPD en cada evaluación, pero no lo usa para elegir.
 5. **`third_party/AVLizador`.** Está vacío en el checkout actual: antes de usar
    `--reward ipd` o `--ipd` hay que hacer `git submodule update --init` y `uv sync` (modelo
    spaCy `ca_core_news_md`), como indica el README.
@@ -225,3 +228,66 @@ evaluación**. Sí se ha comprobado:
   sbatch --job-name=smoke-uji slurm/run.sbatch main.py --lang cat_Latn --dataset uji \
       --reward ipd --n_segments 20 --n_epochs 1 --eval_every 10 --seed 42
   ```
+
+## 7. Métricas de seguimiento durante el entrenamiento
+
+Para ver cómo evoluciona el modelo (y poder hacer gráficas), cada `--eval_every` pasos
+(50 por defecto) la evaluación intermedia calcula, sobre el mismo subconjunto fijo de
+`--eval_n_samples` frases del split de evaluación (`dev`), estas métricas y las guarda en
+`eval_metrics.csv`:
+
+| Columna | Métrica | Para qué |
+|---|---|---|
+| `chrf` | chrF++ contra la referencia | Es la única que elige `adapters_best` (como antes) |
+| `bleu` | BLEU contra la referencia (sacreBLEU, tokenización 13a) | Seguimiento |
+| `ipd` | IPD corpus-level: occidental / (occidental + oriental) sobre todas las hipótesis | Seguimiento de lo que optimiza la recompensa |
+| `ipd_mean` | IPD medio por frase con las no marcadas a 0 | Es la misma cantidad que `--reward ipd` da en entrenamiento, comparable con `reward_raw` |
+| `ipd_western`, `ipd_eastern`, `ipd_unmarked` | Nº de palabras occidentales / orientales y de frases sin ninguna marcada | Diagnóstico del IPD |
+| `comet_kiwi` | COMET-Kiwi (origen + hipótesis, sin referencia) | Comprobar que el modelo no desaprende a traducir |
+
+**Ninguna entra en el GRPO**: son solo información. `chrf` sigue siendo lo único que decide
+el checkpoint.
+
+Detalles:
+
+- **Qué COMET.** En el código no había BLEU, y el único COMET definido es COMET-Kiwi (el de
+  la recompensa híbrida, `wmt22-cometkiwi-da`). Uso ese: es sin referencia, así que sirve
+  igual con cualquier dataset. No he añadido un COMET con referencia (`wmt22-comet-da`).
+  BLEU lo he añadido en `metrics/bleu.py` (sacreBLEU ya era dependencia por el chrF++).
+- **Filas extra.** Además de las evaluaciones cada `--eval_every` pasos, se evalúa el modelo
+  **antes de entrenar** (`step=0`, `epoch=0`; con LoRA recién inicializada es el vanilla, la
+  línea base de las gráficas) y **tras el último paso** si este no coincidía con una
+  evaluación. Estas dos filas son solo de seguimiento y nunca eligen `adapters_best`.
+  Convención de `step`: es el índice del paso de entrenamiento que acaba de ejecutarse (como
+  en la columna `chrf` de `training_metrics.csv`), así que una fila `step=50` lleva 51
+  actualizaciones; la fila base es la de 0 actualizaciones.
+- **Techo de referencia.** `eval_reference.json` guarda el IPD y el COMET-Kiwi de las propias
+  referencias valencianas sobre ese mismo subconjunto, para dibujarlos como línea horizontal.
+- **Flags.** `--eval_metrics` acepta `bleu ipd comet`. Por defecto: `bleu` y `comet`, más `ipd`
+  si `--lang cat_Latn`. `--eval_metrics` sin valores deja solo chrF++. Con `ipd` y otro idioma
+  da error. Las métricas con referencia necesitan corpus paralelo (columna `ref`); tanto UJI
+  como FLORES lo son, y `main.py` falla con un mensaje claro si falta, porque el chrF++
+  también elige el checkpoint. `--eval_batch_size` fija también el tamaño de lote de COMET.
+- **Se aplica también a FLORES** (el CSV se escribe siempre); con `--reward hybrid` se reutiliza
+  el COMET-Kiwi ya cargado para la recompensa, y con `--reward ipd` se carga uno aparte
+  (necesita `HF_TOKEN`, es un modelo gated, y unos GB de GPU más: en tarjetas de 11 GB conviene
+  vigilarlo y usar `--eval_metrics bleu ipd` si hay OOM).
+- **Coste.** Cada evaluación son 100 frases con beam 4 más COMET sobre otras 100: del orden de
+  un minuto o menos por evaluación (sin medir en el clúster). Con `--eval_every 50` es poco
+  frente a 50 pasos de entrenamiento, pero con 100 frases el IPD es ruidoso; si se quiere una
+  curva más limpia, subir `--eval_n_samples` (dev tiene 500).
+
+Cambios de código: `src/eval_metrics.py` (nuevo, calcula las métricas), `metrics/bleu.py`
+(nuevo), `src/trainer.py` (`intermediate_eval` devuelve ahora un diccionario de métricas;
+`run_training` acepta `evaluator` y `eval_logger`; nueva clase `EvalLogger`),
+`src/reward.py` (`load_comet_kiwi()` extraído de `RewardResources`, sin cambio de comportamiento),
+`src/ipd_reward.py` (`corpus_ipd` añade la clave `mean_sentence_ipd`; el resto del diccionario
+no cambia, así que `generate_translations.py --ipd` sigue igual salvo esa clave nueva en el
+`_summary.json`) y `main.py` (flag, construcción del evaluador, `eval_metrics.csv`,
+`eval_reference.json`). `training_metrics.csv` no cambia (sigue teniendo su columna `chrf`).
+
+**Verificación.** Probado con un actor/tokenizador/COMET/IPD simulados (sin GPU ni modelos
+reales): el CSV sale con la fila base, las filas periódicas y la final, `adapters_best` se
+guarda, y sin `evaluator`/`eval_logger` el flujo antiguo es idéntico. Las métricas reales
+(COMET-Kiwi, IPD con spaCy) no se han ejecutado aquí; conviene el smoke test del clúster con
+`--eval_every 10 --n_segments 20`.

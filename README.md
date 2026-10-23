@@ -116,7 +116,9 @@ Defaults match the paper's recipe (LoRA r=16/α=32/dropout=0.05 on `q_proj`/`v_p
 
 Outputs land in `results/{lang}_{scale}_{source}_{reward}/`: `adapters_best/{lang}/` (the checkpoint with
 the highest intermediate chrF++, what the paper evaluates), `adapters/{lang}/`
-(final-step adapter), and `training_metrics.csv` (per-step log).
+(final-step adapter), `training_metrics.csv` (per-step log) and `eval_metrics.csv` (every
+`--eval_every` steps: chrF++, BLEU, IPD for `cat_Latn` and COMET-Kiwi on the eval subset, for
+plotting; monitoring only, see [ADAPTACION_UJI.md](ADAPTACION_UJI.md#7-métricas-de-seguimiento-durante-el-entrenamiento)).
 
 ## Evaluation
 
