@@ -22,6 +22,28 @@ OPTIONAL_METRICS = ("bleu", "ipd", "comet")
 COLUMNS = ["chrf", "bleu", "ipd", "ipd_mean", "ipd_western", "ipd_eastern", "ipd_unmarked", "comet_kiwi"]
 
 
+def default_metrics(lang):
+    """The optional metrics logged by default: bleu and comet, plus ipd for Catalan targets."""
+    return ["bleu", "comet"] + (["ipd"] if lang == "cat_Latn" else [])
+
+
+GAIN_KEYS = ("chrf", "bleu", "ipd", "ipd_mean", "comet_kiwi")
+
+
+def format_metrics(m, signed=False):
+    """Compact one-line summary of a metrics dict (as returned by EvalMetrics.compute);
+    `signed` forces a +/- sign, for printing differences."""
+    names = {"chrf": "chrF++", "bleu": "BLEU", "ipd": "IPD", "ipd_mean": "IPDmean", "comet_kiwi": "Kiwi"}
+    spec = "+.4f" if signed else ".4f"
+    return " | ".join(f"{n}: {m[k]:{spec}}" for k, n in names.items() if m.get(k) is not None)
+
+
+def metric_gain(trained, vanilla):
+    """trained - vanilla for every headline metric both have (None if either is missing)."""
+    return {k: trained[k] - vanilla[k] for k in GAIN_KEYS
+            if trained.get(k) is not None and vanilla.get(k) is not None}
+
+
 class EvalMetrics:
     """`metrics` is a subset of OPTIONAL_METRICS. `comet_model` is a loaded COMET-Kiwi
     checkpoint, required when "comet" is requested."""

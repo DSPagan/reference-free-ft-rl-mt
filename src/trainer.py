@@ -11,6 +11,7 @@ from torch.optim import AdamW
 from tqdm import tqdm
 
 from metrics.chrf import chrf_corpus
+from src.eval_metrics import format_metrics
 from src.models import DEVICE
 
 CLIP_LOW, CLIP_HIGH = 0.8, 1.2
@@ -167,12 +168,6 @@ def intermediate_eval(actor, tokenizer, df_eval, lang, n_samples=100, batch_size
     return evaluator.compute(srcs, hyps, refs)
 
 
-def _fmt_metrics(m):
-    """Compact one-line summary of an intermediate-eval metrics dict for the console."""
-    names = {"chrf": "chrF", "bleu": "BLEU", "ipd": "IPD", "ipd_mean": "IPDmean", "comet_kiwi": "Kiwi"}
-    return " | ".join(f"{n}: {m[k]:.4f}" for k, n in names.items() if m.get(k) is not None)
-
-
 def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, out_dir,
                   n_epochs=3, lr=5e-6, k=12, max_new_tokens_train=64, max_new_tokens_eval=128,
                   kl_beta=0.001, eval_every=50, eval_n_samples=100,
@@ -200,7 +195,7 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
         m = intermediate_eval(actor, tokenizer, df_eval, lang, eval_n_samples, eval_batch_size,
                               max_new_tokens_eval, src_lang, evaluator)
         eval_logger.log(lang, step, epoch, min(eval_n_samples, len(df_eval)), m)
-        print(f"\n  Eval @ step {step} (ep{epoch}) | {_fmt_metrics(m)}")
+        print(f"\n  Eval @ step {step} (ep{epoch}) | {format_metrics(m)}")
         actor.train()
 
     if eval_logger is not None:
@@ -224,7 +219,7 @@ def run_training(actor, tokenizer, rewarder, logger, df_train, df_eval, lang, ou
                 chrf_val = metrics["chrf"]
                 if eval_logger is not None:
                     eval_logger.log(lang, global_step, epoch + 1, min(eval_n_samples, len(df_eval)), metrics)
-                    print(f"\n  Eval @ step {global_step} | {_fmt_metrics(metrics)}")
+                    print(f"\n  Eval @ step {global_step} | {format_metrics(metrics)}")
                 if chrf_val > best_chrf:
                     best_chrf, best_step = chrf_val, global_step
                     os.makedirs(best_adapter_path, exist_ok=True)

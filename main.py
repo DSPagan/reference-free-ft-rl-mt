@@ -30,7 +30,7 @@ import torch
 from transformers import AutoTokenizer
 
 from src.data import DATASETS, resolve_data_dir
-from src.eval_metrics import COLUMNS, OPTIONAL_METRICS, EvalMetrics
+from src.eval_metrics import COLUMNS, OPTIONAL_METRICS, EvalMetrics, default_metrics
 from src.models import load_actor
 from src.trainer import EvalLogger, TrainingLogger, eval_sample, run_training
 
@@ -144,10 +144,7 @@ def main():
     if "ref" not in df_eval.columns:
         raise ValueError("the intermediate eval (chrF++, which picks adapters_best) needs a parallel "
                          f"corpus: no 'ref' column in the {eval_split} split")
-    if args.eval_metrics is None:
-        eval_metrics = ["bleu", "comet"] + (["ipd"] if args.lang == "cat_Latn" else [])
-    else:
-        eval_metrics = args.eval_metrics
+    eval_metrics = default_metrics(args.lang) if args.eval_metrics is None else args.eval_metrics
     if "ipd" in eval_metrics and args.lang != "cat_Latn":
         raise ValueError("the ipd eval metric only makes sense for Catalan targets (--lang cat_Latn)")
 
