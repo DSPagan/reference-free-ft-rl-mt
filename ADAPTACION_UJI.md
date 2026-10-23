@@ -291,3 +291,41 @@ reales): el CSV sale con la fila base, las filas periódicas y la final, `adapte
 guarda, y sin `evaluator`/`eval_logger` el flujo antiguo es idéntico. Las métricas reales
 (COMET-Kiwi, IPD con spaCy) no se han ejecutado aquí; conviene el smoke test del clúster con
 `--eval_every 10 --n_segments 20`.
+
+## 8. Las mismas métricas en `generate_translations.py`
+
+Para comparar el entrenamiento con la evaluación final, `generate_translations.py` calcula
+ahora sobre `devtest` el mismo conjunto de métricas que `eval_metrics.csv` (mismo código,
+`src/eval_metrics.py`), para el vanilla, el adaptador y las propias referencias:
+
+```bash
+uv run python generate_translations.py \
+    --adapter_path results/cat_Latn_600m_en_ipd_uji/adapters_best/cat_Latn \
+    --lang cat_Latn --scale 600m --dataset uji --setting "default(beam5,lp1.0)"
+```
+
+- **`--metrics`** (nuevo, `bleu ipd comet`): por defecto `bleu` y `comet`, más `ipd` si
+  `--lang cat_Latn`, igual que `main.py --eval_metrics`. `--metrics` sin valores deja solo
+  chrF++. **`--ipd` se mantiene** por compatibilidad y asegura que `ipd` esté en la lista.
+  **Cambio de comportamiento:** antes solo se calculaba chrF++ (y el IPD con `--ipd`); ahora,
+  por defecto, también BLEU y COMET-Kiwi, que necesita `HF_TOKEN` (modelo gated) y más
+  memoria. Para el comportamiento anterior, `--metrics` sin valores (o `--metrics ipd`).
+- **Consola:** líneas `Vanilla`, `Reference` (IPD y COMET-Kiwi de las referencias, las únicas
+  métricas que tienen sentido sobre ellas) y `Trained`, más `Trained - vanilla` con la
+  diferencia de cada métrica.
+- **`{lang}_summary.json`:** se mantienen todas las claves anteriores (`vanilla_chrf`,
+  `trained_chrf`, `chrf_gain`, y `reference_ipd`/`vanilla_ipd`/`trained_ipd` con el mismo
+  formato, más la clave `mean_sentence_ipd`). Nuevas: `metrics` (lista calculada),
+  `vanilla_metrics`, `trained_metrics`, `reference_metrics` (diccionarios con las claves de
+  las columnas de `eval_metrics.csv`: `chrf`, `bleu`, `ipd`, `ipd_mean`, `ipd_western`,
+  `ipd_eastern`, `ipd_unmarked`, `comet_kiwi`) y `metric_gain` (entrenado − vanilla).
+- **Comparabilidad con el entrenamiento.** Los números no coinciden exactamente con
+  `eval_metrics.csv` por construcción: el entrenamiento mide 100 frases de `dev` con beam 4,
+  y la evaluación final mide todo `devtest` (1 001 frases) con el ajuste de decodificación
+  indicado (`--setting` o el mejor de la rejilla). Dentro de cada una, las métricas son las
+  mismas y comparables entre vanilla y adaptador. Para una curva y un punto final del
+  mismo tipo, usar `--eval_n_samples 500` (todo `dev`) en el entrenamiento.
+- Cambios de código: `generate_translations.py` y, en `src/eval_metrics.py`,
+  `default_metrics`, `format_metrics` (movida desde `src/trainer.py`) y `metric_gain`.
+  Probado con modelo, tokenizador, COMET e IPD simulados (ver sección 7 para lo no
+  verificable sin GPU).

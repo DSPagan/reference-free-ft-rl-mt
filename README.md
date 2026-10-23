@@ -134,7 +134,9 @@ REPRODUCTION.md). Without it, a 3-setting beam-search grid is dev-tuned independ
 for each system and each system's winning setting is applied to the held-out `devtest`
 split. Omit `--adapter_path` to score only the vanilla model. `--ipd` adds the
 corpus-level IPD (Valencian share of all marked words) of the reference and of each
-system to the printed results and `{lang}_summary.json`.
+system to the printed results and `{lang}_summary.json`. Next to chrF++ it now reports the
+same metrics main.py logs during training (BLEU, COMET-Kiwi and, for `cat_Latn`, IPD; see
+`--metrics` and [ADAPTACION_UJI.md](ADAPTACION_UJI.md#8-las-mismas-métricas-en-generate_translationspy)).
 
 ## Pretrained adapters
 
