@@ -9,6 +9,9 @@ venv/
 env/
 .venv/
 
+# --- VS Code ---
+.vscode/
+
 # --- Secrets ---
 .env
 
