@@ -30,6 +30,7 @@ generate_translations.py   Inference entry point -- loads an adapter, decodes, s
                         chrF++ against vanilla
 decoding_diagnostic.py Scores vanilla under every decoding setting, 4-bit and fp32
 prepare_data.py        Builds the FLORES-200 parquet files the above expect
+filter_dialectal.py    Keeps the UJI sentences with Valencian words that differ in Catalan
 prepare_uji.py         Builds the train/dev/devtest parquet files from the UJI va-en corpus
 third_party/AVLizador  git submodule (pinned commit) providing the IPD
 slurm/run.sbatch       SLURM job wrapper for any of the scripts
@@ -96,6 +97,10 @@ The UJI Valencian–English news corpus (`data/va_en_uji/*.jsonl`) is converted 
 `prepare_uji.py` into `data/uji_eng/cat_Latn/{train,dev,devtest}.parquet` (English source,
 Valencian references, split by news article) and selected with `--dataset uji`. See
 [ADAPTACION_UJI.md](ADAPTACION_UJI.md) for the details and a full example.
+
+`filter_dialectal.py` extracts the sentences whose Valencian side has a word that differs in
+Catalan (AVLizador dictionaries); `prepare_uji.py` then also writes that subset, with the same
+split, to `data/uji_eng_dialectal/` (use it with `--data_dir data/uji_eng_dialectal`).
 
 ## Training
 

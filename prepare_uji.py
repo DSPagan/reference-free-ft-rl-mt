@@ -12,11 +12,18 @@ The split is by news article (all sentences of an article land in the same split
 neighbouring sentences of one text never leak from train into dev/devtest, and is seeded so
 it is reproducible. Rows are shuffled within each split.
 
+If the dialectal subset built by filter_dialectal.py exists (--filtered_input; only the
+sentences whose Valencian side has a word that differs in Catalan), the same splits restricted
+to those sentences are also written to a sibling folder (--filtered_out_dir, default
+data/uji_eng_dialectal). Reusing the full split keeps both datasets consistent: a sentence
+that is in train for one is in train for the other, so there is no leakage between them.
+
 Cleaning: most sentences (both sides) end in a doubled full stop ('..', an artifact of the
 corpus build); a trailing '..' is collapsed to '.', while a genuine ellipsis ('...') is kept.
 Pass --keep_double_period to leave the text exactly as it is in the jsonl.
 
 Usage:
+    uv run python filter_dialectal.py
     uv run python prepare_uji.py
     uv run python prepare_uji.py --n_devtest 1000 --n_dev 500 --seed 42
 """
@@ -73,10 +80,22 @@ def split_by_article(rows, n_devtest, n_dev, seed):
     return splits
 
 
+def write_splits(splits, out_dir, lang):
+    lang_dir = os.path.join(out_dir, lang)
+    os.makedirs(lang_dir, exist_ok=True)
+    for name, sents in splits.items():
+        out_path = os.path.join(lang_dir, f"{name}.parquet")
+        pd.DataFrame(sents, columns=["src", "ref", "article"]).to_parquet(out_path, index=False)
+        print(f"  wrote {out_path} ({len(sents)} rows, {len({s['article'] for s in sents})} articles)")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--input", default="data/va_en_uji/va-en-sentence.length.ner.curated.jsonl")
     p.add_argument("--out_dir", default="data/uji_eng")
+    p.add_argument("--filtered_input", default="data/va_en_uji/va-en-sentence.length.ner.curated.dialectal.jsonl",
+                   help="Output of filter_dialectal.py. Skipped, with a message, if it does not exist.")
+    p.add_argument("--filtered_out_dir", default="data/uji_eng_dialectal")
     p.add_argument("--lang", default="cat_Latn", help="Target-language directory name to write under out_dir.")
     p.add_argument("--n_devtest", type=int, default=1000, help="Held-out test sentences (FLORES devtest has 1012).")
     p.add_argument("--n_dev", type=int, default=500,
@@ -90,14 +109,19 @@ def main():
     print(f"Read {len(rows)} sentence pairs from {args.input} ({dropped} dropped: empty side)")
 
     splits = split_by_article(rows, args.n_devtest, args.n_dev, args.seed)
-    lang_dir = os.path.join(args.out_dir, args.lang)
-    os.makedirs(lang_dir, exist_ok=True)
-    for name, sents in splits.items():
-        out_path = os.path.join(lang_dir, f"{name}.parquet")
-        pd.DataFrame(sents, columns=["src", "ref", "article"]).to_parquet(out_path, index=False)
-        print(f"  wrote {out_path} ({len(sents)} rows, {len({s['article'] for s in sents})} articles)")
-
+    write_splits(splits, args.out_dir, args.lang)
     print(f"\nDone. Output under {args.out_dir}/ (EN -> {args.lang}, Valencian references)")
+
+    if not os.path.exists(args.filtered_input):
+        print(f"\n{args.filtered_input} not found: skipping the dialectal subset (run filter_dialectal.py first)")
+        return
+    filtered, _ = load_rows(args.filtered_input, args.keep_double_period)
+    keep = {(r["src"], r["ref"], r["article"]) for r in filtered}
+    subset = {name: [r for r in sents if (r["src"], r["ref"], r["article"]) in keep]
+              for name, sents in splits.items()}
+    print(f"\nDialectal subset: {sum(map(len, subset.values()))} of {len(rows)} sentence pairs")
+    write_splits(subset, args.filtered_out_dir, args.lang)
+    print(f"\nDone. Dialectal subset under {args.filtered_out_dir}/")
 
 
 if __name__ == "__main__":
